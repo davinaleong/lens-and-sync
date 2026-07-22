@@ -17,9 +17,9 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 ## 2. Transport & Headers
 
 - [ ] Enforce HTTPS everywhere; enable HSTS
-- [ ] Use `helmet` for security headers (CSP, X-Content-Type-Options, X-Frame-Options, etc.)
-- [ ] Set `Access-Control-Allow-Origin` to an explicit allowlist, not `*`
-- [ ] Disable framework fingerprinting (`app.disable('x-powered-by')`)
+- [x] Use `helmet` for security headers (CSP, X-Content-Type-Options, X-Frame-Options, etc.) — defaults only so far, no custom CSP yet (see `07-implementation-log.md` Cycle 2)
+- [x] Set `Access-Control-Allow-Origin` to an explicit allowlist, not `*` (see `07-implementation-log.md` Cycle 2)
+- [x] Disable framework fingerprinting (`app.disable('x-powered-by')`)
 
 ## 3. Input Handling
 
@@ -71,7 +71,7 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 8. Abuse Prevention & Moderation
 
-- [ ] Rate-limit API requests per IP/user/API key (`express-rate-limit` + `rate-limit-redis` — see `06-toolchain-decisions.md`)
+- [x] Rate-limit API requests per IP/user/API key (`express-rate-limit` + `rate-limit-redis`, live on both apps — see `07-implementation-log.md` Cycle 2)
 - [ ] Rate-limit image uploads per user (count and bandwidth) — iOS clients may retry aggressively on poor cellular connections, so limits need to tolerate legitimate retries without allowing abuse
 - [ ] Run uploaded images through a moderation pipeline (NSFW/inappropriate content detection) before processing — reuses the Google Vision SafeSearch annotation, no separate provider (see `06-toolchain-decisions.md`)
 - [ ] Provide report/block/delete mechanisms for saved chats and images
