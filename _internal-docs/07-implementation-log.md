@@ -71,3 +71,33 @@ running.
 **Not done yet:** `helmet()` config is still defaults (no custom CSP).
 JWT verification middleware itself (`shared-auth`) is still a stub — config
 validates the secrets exist, but nothing checks a token yet.
+
+---
+
+## 2026-07-22 — Cycle 3: DishLens blur detection
+
+**What:** `apps/dish-lens/src/preprocessing/blur-detection.ts` implements
+the Laplacian-variance blur check from `02-milestones-checklist.md` #3 and
+`01-security-checklist.md` §5: greyscale the image, convolve with a 3×3
+Laplacian kernel (`[0,1,0,1,-4,1,0,1,0]`), and return the variance of the
+resulting pixel values. Flat/blurry regions produce near-zero edge
+response (low variance); crisp edges produce large swings (high
+variance). `isBlurry(buffer, threshold)` wraps it as a boolean check.
+Threshold is a parameter, not read from config internally — keeps the
+module a pure, dependency-free function so it's trivially unit-testable
+and the actual threshold value (`BLUR_VARIANCE_THRESHOLD`) is supplied by
+whatever calls it later (the upload pipeline, not yet built).
+
+**Tests:** `tests/preprocessing/blur-detection.test.ts` — no real photo
+fixtures needed. Generates synthetic images in-memory with `sharp`: a
+flat uniform-gray image (variance ≈ 0) and a high-frequency checkerboard
+(variance > 1000), then applies real Gaussian blur to the checkerboard
+and confirms variance drops. That last case is the important one — it
+proves the metric responds correctly to actual blurring, not just that
+two arbitrary fixtures produce different numbers. 5 tests passing.
+
+**Not done yet:** not wired into the upload pipeline (`src/upload/` is
+still a TODO stub) — that's Cycle 4 territory, along with file-type
+validation. Real photo fixtures (per `04-testing-checklist.md`'s
+"dedicated fixture images required" for edge cases) still don't exist —
+synthetic images validate the algorithm, not real-world calibration.

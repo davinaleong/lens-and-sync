@@ -25,7 +25,7 @@ Toolchain: pnpm + Turborepo (proposed default) · Pinecone · Redis · Postgres 
 
 - [ ] **1. Upload endpoint** — image intake (multipart/base64), file-type validation, size/dimension limits sized for real iPhone camera output (HEIC, 10–20MB+)
 - [ ] **2. Preprocessing** — `sharp` re-encode, EXIF strip (after orientation correction), format normalization from HEIC
-- [ ] **3. Blur detection** — Laplacian variance check run *before* Vision call; reject unusable images early to save API cost
+- [ ] **3. Blur detection** — Laplacian variance check run *before* Vision call; reject unusable images early to save API cost. Algorithm implemented and unit-tested (`07-implementation-log.md` Cycle 3) — not yet wired before a Vision call, since there's no upload endpoint/Vision integration yet.
 - [ ] **4. Dish detection (Google Vision)** — label/object detection, extract candidate dish name + confidence score
 - [ ] **5. Edge case: multi-dish rejection** — multiple distinct food labels above confidence threshold → reject with clear message
 - [ ] **6. Edge case: non-dish rejection** — raw-ingredient/non-food labels (egg, carrot, plate, person) → reject with clear message
