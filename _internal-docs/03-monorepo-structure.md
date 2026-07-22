@@ -1,6 +1,6 @@
 # Monorepo Structure — DriveSync & DishLens
 
-Reflects finalized decisions: Pinecone (vector store), Redis (session state), Postgres + Prisma (persistent storage, centralized in `shared-db`), Laplacian blur detection, pnpm + Turborepo (proposed default — confirm before scaffolding).
+Reflects finalized decisions: Pinecone (vector store), Redis (session state), Postgres + Prisma (persistent storage, centralized in `shared-db`), Laplacian blur detection, pnpm + Turborepo.
 
 ```
 recipe-platform/
@@ -75,4 +75,4 @@ recipe-platform/
 └── README.md
 ```
 
-**Open decision:** workspace tooling — pnpm + Turborepo (proposed default) vs. Yarn + Nx. Confirm before scaffolding actual config files.
+**Resolved (2026-07-22):** workspace tooling is pnpm + Turborepo. Scaffolded in full — see `05-progress.md`.

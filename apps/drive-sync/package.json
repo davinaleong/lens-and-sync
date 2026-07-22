@@ -1,0 +1,36 @@
+{
+  "name": "@lens-and-sync/drive-sync",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Google Drive to Pinecone vector sync API.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lens-and-sync/shared-auth": "workspace:*",
+    "@lens-and-sync/shared-config": "workspace:*",
+    "@lens-and-sync/shared-db": "workspace:*",
+    "@lens-and-sync/shared-logger": "workspace:*",
+    "@lens-and-sync/shared-types": "workspace:*",
+    "@lens-and-sync/shared-utils": "workspace:*",
+    "@pinecone-database/pinecone": "^3.0.0",
+    "express": "^4.19.2",
+    "googleapis": "^140.0.0",
+    "helmet": "^7.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

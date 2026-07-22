@@ -1,0 +1,63 @@
+// Shared Prisma schema for drive-sync and dish-lens.
+// See _internal-docs/03-monorepo-structure.md for how this package is consumed.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Shared identity ---
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  createdAt    DateTime      @default(now())
+  refreshTokens RefreshToken[]
+  savedChats   SavedChat[]
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([userId])
+}
+
+// --- DriveSync ---
+
+model DriveFile {
+  id               String   @id @default(uuid())
+  driveFileId      String   @unique
+  title            String
+  sourceUrl        String
+  contentHash      String
+  driveModifiedTime DateTime
+  chunkIds         String[]
+  lastSyncedAt     DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([contentHash])
+}
+
+// --- DishLens ---
+
+// Write-once: no application code path may update a row after creation.
+model SavedChat {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  dishName  String
+  messages  Json
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@lens-and-sync/shared-config",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Env schema and config loader shared across apps.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.0"
+  }
+}
