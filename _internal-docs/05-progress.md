@@ -67,7 +67,11 @@ regardless).
    one full vertical path — e.g. blur detection + file-type validation,
    since both are pure functions that don't need live credentials to write
    or unit-test.
-2. Wire `shared-config`'s zod env schema so both apps fail fast on missing
-   env vars.
+2. ~~Wire `shared-config`'s zod env schema so both apps fail fast on
+   missing env vars.~~ Loader built (`loadEnv`, tested) — see
+   `07-implementation-log.md` Cycle 1. Still needs wiring into each app's
+   `index.ts` — that's `07-implementation-log.md` Cycle 2.
 3. Get real Pinecone/Vision/Google OAuth credentials into a `.env` (not
    committed) before attempting any live-integration work.
+
+See `07-implementation-log.md` for the ongoing implementation cycle log.
