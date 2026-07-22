@@ -42,13 +42,13 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 5. DishLens-Specific — Image Upload Security
 
-- [ ] Verify actual file signature (magic bytes) via `file-type` — never trust client MIME type/extension, including iOS-supplied HEIC headers
+- [ ] Verify actual file signature (magic bytes) via `file-type` — never trust client MIME type/extension, including iOS-supplied HEIC headers. Logic implemented + unit-tested (`07-implementation-log.md` Cycle 4) — not yet enforced on a live route.
 - [ ] Re-encode every uploaded image server-side (`sharp`) rather than storing the raw upload
-- [ ] Apply Laplacian variance blur check *before* calling Google Vision — rejects unusable images without incurring Vision API cost
+- [ ] Apply Laplacian variance blur check *before* calling Google Vision — rejects unusable images without incurring Vision API cost. Algorithm implemented + unit-tested (`07-implementation-log.md` Cycle 3) — not yet wired before a Vision call.
 - [ ] Strip EXIF metadata on re-encode (GPS, device info) — but apply orientation correction *before* stripping, so images aren't left sideways
-- [ ] Enforce file size AND pixel dimension limits sized for real iPhone camera output
-- [ ] Allowlist formats strictly (HEIC/HEIC input accepted and converted, JPEG/PNG/WEBP as processed output); reject everything else
-- [ ] Treat SVG as executable script if ever accepted anywhere in the stack — sanitize or disallow entirely
+- [ ] Enforce file size AND pixel dimension limits sized for real iPhone camera output. Size limit implemented (`07-implementation-log.md` Cycle 4) — pixel-dimension limit still needs a decoded image, not done yet.
+- [ ] Allowlist formats strictly (HEIC/HEIC input accepted and converted, JPEG/PNG/WEBP as processed output); reject everything else. Allowlist logic implemented + unit-tested — not yet enforced on a live route.
+- [x] Treat SVG as executable script if ever accepted anywhere in the stack — sanitize or disallow entirely (`validateUpload` never accepts SVG regardless of route wiring — see `07-implementation-log.md` Cycle 4)
 - [ ] Upload to object storage (Google Cloud Storage) via pre-signed URLs rather than routing raw binary through the API server where avoidable (see `06-toolchain-decisions.md`)
 - [ ] Use random, non-guessable object keys (UUID) — never the user-supplied filename
 - [ ] Keep any stored images private by default; signed, expiring URLs only

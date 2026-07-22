@@ -37,7 +37,7 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 ## DishLens — Testing Checklist
 
 **Unit tests**
-- [ ] File-type/magic-byte validation rejects mismatched extensions
+- [x] File-type/magic-byte validation rejects mismatched extensions (`07-implementation-log.md` Cycle 4)
 - [x] Laplacian variance blur check: correctly flags blurry test images below threshold, passes sharp ones (`07-implementation-log.md` Cycle 3, synthetic images)
 - [ ] Blur threshold calibration test set (mix of clear/blurry photos) — confirms no false positives on clearly sharp images. Still needs *real* photo fixtures — synthetic sharp/blurred pairs confirm the algorithm responds correctly but aren't real-world calibration.
 - [ ] EXIF stripping confirmed on output (no leaked GPS/device data)

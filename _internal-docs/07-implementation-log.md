@@ -101,3 +101,34 @@ still a TODO stub) — that's Cycle 4 territory, along with file-type
 validation. Real photo fixtures (per `04-testing-checklist.md`'s
 "dedicated fixture images required" for edge cases) still don't exist —
 synthetic images validate the algorithm, not real-world calibration.
+
+---
+
+## 2026-07-22 — Cycle 4: DishLens upload validation
+
+**What:** `apps/dish-lens/src/upload/index.ts` — `validateUpload(buffer,
+{ maxSizeBytes })` implements the two checks from
+`01-security-checklist.md` §5 that don't need a live service: real
+magic-byte sniffing via `file-type` (never the client's claimed
+Content-Type/extension) against a strict allowlist (JPEG/PNG/WEBP/HEIC/
+HEIF — SVG and everything else rejected, since SVG is executable script
+per the checklist), plus a size-limit check. Returns a discriminated
+union (`ok: true` | `too-large` | `unrecognized-format` |
+`unsupported-format`) so callers get a distinct, non-leaky reason per
+rejection path (`01-security-checklist.md` §6's "distinct, non-leaky
+error message" requirement, applied one level down from the API
+response).
+
+**Tests:** `tests/upload/validate-upload.test.ts` — real PNG/JPEG buffers
+generated with `sharp` (accepted), a plain-text buffer with no image
+signature at all (rejected as `unrecognized-format` — simulates a renamed
+non-image file), a real TIFF buffer (rejected as `unsupported-format` —
+proves the allowlist rejects *recognized* formats too, not just garbage),
+and an oversized buffer rejection. 5 tests passing, 10/10 across the app.
+
+**Not done yet:** not wired into an Express route yet — no multer/
+multipart handling, no pixel-dimension limit (needs a decoded image, not
+just the raw buffer), no GCS pre-signed upload URL. Those need an actual
+`POST /upload` route, which also needs the blur check (Cycle 3) and
+Vision call wired together — a bigger integration slice than a pure
+function, saved for a dedicated cycle.
