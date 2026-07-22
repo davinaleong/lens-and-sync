@@ -38,7 +38,7 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 - [ ] Namespace isolation in Pinecone if multiple folders/tenants are ever supported — prevent cross-tenant retrieval leakage
 - [ ] Stable vector ID scheme (`{fileId}-{chunkIndex}`) prevents duplicate/orphaned vectors on re-sync
 - [ ] Deleted Drive files trigger actual Pinecone vector deletion, not just a DB flag — stale vectors are a data leakage risk in retrieval results
-- [ ] Sync job locking prevents concurrent runs from producing conflicting writes
+- [ ] Sync job locking prevents concurrent runs from producing conflicting writes (BullMQ + Redis, see `06-toolchain-decisions.md`)
 
 ## 5. DishLens-Specific — Image Upload Security
 
@@ -49,7 +49,7 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 - [ ] Enforce file size AND pixel dimension limits sized for real iPhone camera output
 - [ ] Allowlist formats strictly (HEIC/HEIC input accepted and converted, JPEG/PNG/WEBP as processed output); reject everything else
 - [ ] Treat SVG as executable script if ever accepted anywhere in the stack — sanitize or disallow entirely
-- [ ] Upload to object storage via pre-signed URLs rather than routing raw binary through the API server where avoidable
+- [ ] Upload to object storage (Google Cloud Storage) via pre-signed URLs rather than routing raw binary through the API server where avoidable (see `06-toolchain-decisions.md`)
 - [ ] Use random, non-guessable object keys (UUID) — never the user-supplied filename
 - [ ] Keep any stored images private by default; signed, expiring URLs only
 
@@ -71,9 +71,9 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 8. Abuse Prevention & Moderation
 
-- [ ] Rate-limit API requests per IP/user/API key (`express-rate-limit` or Redis-backed — you already have Redis, so use it here too)
+- [ ] Rate-limit API requests per IP/user/API key (`express-rate-limit` + `rate-limit-redis` — see `06-toolchain-decisions.md`)
 - [ ] Rate-limit image uploads per user (count and bandwidth) — iOS clients may retry aggressively on poor cellular connections, so limits need to tolerate legitimate retries without allowing abuse
-- [ ] Run uploaded images through a moderation pipeline (NSFW/inappropriate content detection) before processing
+- [ ] Run uploaded images through a moderation pipeline (NSFW/inappropriate content detection) before processing — reuses the Google Vision SafeSearch annotation, no separate provider (see `06-toolchain-decisions.md`)
 - [ ] Provide report/block/delete mechanisms for saved chats and images
 
 ## 9. Secrets & Configuration

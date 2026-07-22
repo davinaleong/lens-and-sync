@@ -20,6 +20,8 @@
     "@lens-and-sync/shared-logger": "workspace:*",
     "@lens-and-sync/shared-types": "workspace:*",
     "@lens-and-sync/shared-utils": "workspace:*",
+    "@anthropic-ai/sdk": "^0.27.0",
+    "@google-cloud/storage": "^7.12.0",
     "@google-cloud/vision": "^4.3.0",
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
@@ -27,6 +29,7 @@
     "helmet": "^7.1.0",
     "ioredis": "^5.4.1",
     "multer": "^1.4.5-lts.1",
+    "rate-limit-redis": "^4.2.0",
     "sharp": "^0.33.5",
     "zod": "^3.23.8"
   },

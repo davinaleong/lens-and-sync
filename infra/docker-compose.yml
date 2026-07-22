@@ -31,6 +31,7 @@ services:
       - "4001:4001"
     depends_on:
       - postgres
+      - redis
 
   dish-lens:
     build:
