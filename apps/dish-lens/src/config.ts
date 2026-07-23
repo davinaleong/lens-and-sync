@@ -30,6 +30,7 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
 
   MAX_UPLOAD_SIZE_MB: z.coerce.number(),
+  MAX_IMAGE_DIMENSION_PX: z.coerce.number(),
   BLUR_VARIANCE_THRESHOLD: z.coerce.number(),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number(),

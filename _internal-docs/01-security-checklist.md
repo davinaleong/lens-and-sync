@@ -42,12 +42,12 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 5. DishLens-Specific — Image Upload Security
 
-- [ ] Verify actual file signature (magic bytes) via `file-type` — never trust client MIME type/extension, including iOS-supplied HEIC headers. Logic implemented + unit-tested (`07-implementation-log.md` Cycle 4) — not yet enforced on a live route.
+- [x] Verify actual file signature (magic bytes) via `file-type` — never trust client MIME type/extension, including iOS-supplied HEIC headers. Enforced live on `POST /upload` (`07-implementation-log.md` Cycle 5).
 - [ ] Re-encode every uploaded image server-side (`sharp`) rather than storing the raw upload
-- [ ] Apply Laplacian variance blur check *before* calling Google Vision — rejects unusable images without incurring Vision API cost. Algorithm implemented + unit-tested (`07-implementation-log.md` Cycle 3) — not yet wired before a Vision call.
+- [x] Apply Laplacian variance blur check *before* calling Google Vision — rejects unusable images without incurring Vision API cost. Wired live on `POST /upload`, ahead of any Vision call (`07-implementation-log.md` Cycle 5).
 - [ ] Strip EXIF metadata on re-encode (GPS, device info) — but apply orientation correction *before* stripping, so images aren't left sideways
-- [ ] Enforce file size AND pixel dimension limits sized for real iPhone camera output. Size limit implemented (`07-implementation-log.md` Cycle 4) — pixel-dimension limit still needs a decoded image, not done yet.
-- [ ] Allowlist formats strictly (HEIC/HEIC input accepted and converted, JPEG/PNG/WEBP as processed output); reject everything else. Allowlist logic implemented + unit-tested — not yet enforced on a live route.
+- [x] Enforce file size AND pixel dimension limits sized for real iPhone camera output. Both enforced live on `POST /upload` (`MAX_UPLOAD_SIZE_MB`, `MAX_IMAGE_DIMENSION_PX`) — see `07-implementation-log.md` Cycle 5. Note: real HEIC dimension-checking doesn't work yet — this environment's libvips can't decode HEVC-coded HEIC, so it fails closed as `unreadable-image` until HEIC→JPEG normalization exists.
+- [x] Allowlist formats strictly (HEIC/HEIF input accepted and converted, JPEG/PNG/WEBP as processed output); reject everything else. Enforced live on `POST /upload` (`07-implementation-log.md` Cycle 5).
 - [x] Treat SVG as executable script if ever accepted anywhere in the stack — sanitize or disallow entirely (`validateUpload` never accepts SVG regardless of route wiring — see `07-implementation-log.md` Cycle 4)
 - [ ] Upload to object storage (Google Cloud Storage) via pre-signed URLs rather than routing raw binary through the API server where avoidable (see `06-toolchain-decisions.md`)
 - [ ] Use random, non-guessable object keys (UUID) — never the user-supplied filename

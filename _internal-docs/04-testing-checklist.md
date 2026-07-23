@@ -37,8 +37,9 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 ## DishLens — Testing Checklist
 
 **Unit tests**
-- [x] File-type/magic-byte validation rejects mismatched extensions (`07-implementation-log.md` Cycle 4)
-- [x] Laplacian variance blur check: correctly flags blurry test images below threshold, passes sharp ones (`07-implementation-log.md` Cycle 3, synthetic images)
+- [x] File-type/magic-byte validation rejects mismatched extensions (`07-implementation-log.md` Cycle 4); composed end-to-end with dimension + blur checks and verified live on `POST /upload` (Cycle 5)
+- [x] Laplacian variance blur check: correctly flags blurry test images below threshold, passes sharp ones (`07-implementation-log.md` Cycle 3, synthetic images); confirmed wired *before* any Vision call on the live route (Cycle 5)
+- [x] Pixel-dimension limit rejects oversized decoded images, reports actual width/height (`07-implementation-log.md` Cycle 5) — real HEIC inputs still fail closed as unreadable pending HEIC→JPEG normalization
 - [ ] Blur threshold calibration test set (mix of clear/blurry photos) — confirms no false positives on clearly sharp images. Still needs *real* photo fixtures — synthetic sharp/blurred pairs confirm the algorithm responds correctly but aren't real-world calibration.
 - [ ] EXIF stripping confirmed on output (no leaked GPS/device data)
 - [ ] Session store: create/read/expire session state correctly (TTL behavior)
