@@ -34,8 +34,8 @@ Toolchain: pnpm + Turborepo (proposed default) · Pinecone · Redis · Postgres 
 - [ ] **9. Nutrition info** — Edamam lookup matched to generated ingredients
 - [x] **10. Session management (Redis)** — session creation/expiry (TTL-based), session-scoped message state, session ID issuance. `createSessionStore()` implemented + unit-tested against real Redis, including live TTL/sliding-expiration behavior (`07-implementation-log.md` Cycle 7). Not yet wired into a route — no Vision integration exists yet to start a real session.
 - [ ] **11. Response assembly** — structured chat response appended to Redis session; consistent error schema across all rejection paths
-- [ ] **12. Save-chat flow (Postgres/Prisma)** — snapshot Redis session → immutable `SavedChat` record (JSONB messages); reject any write attempt to an already-saved chat
-- [ ] **13. History listing** — list user's saved chats + read-only view-saved-chat endpoint
+- [x] **12. Save-chat flow (Postgres/Prisma)** — snapshot Redis session → immutable `SavedChat` record (JSONB messages); reject any write attempt to an already-saved chat. `saveChat()` implemented + unit-tested against real Postgres (`07-implementation-log.md` Cycle 8) — write-once enforced by having no update path at all. Not wired to a route yet (needs `shared-auth`); no endpoint exists yet that could attempt a post-archive write.
+- [x] **13. History listing** — list user's saved chats + read-only view-saved-chat endpoint. `listSavedChats()`/`getSavedChat()` implemented + unit-tested against real Postgres, owner-scoped (`07-implementation-log.md` Cycle 8). Not wired to a route yet — same auth blocker as #12.
 - [ ] **14. Abuse/rate limiting & moderation** — per-user upload limits (Redis-backed), NSFW/inappropriate content moderation pass
 - [ ] **15. Testing** — full edge case fixture set (multi-dish, blurry, non-dish, borderline cases), blur threshold calibration, iOS-specific integration tests (HEIC, background upload, token refresh, poor network)
 - [ ] **16. Deploy** — staging environment with real Vision + Pinecone-adjacent services before prod cutover

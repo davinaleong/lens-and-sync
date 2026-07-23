@@ -43,7 +43,7 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 - [ ] Blur threshold calibration test set (mix of clear/blurry photos) — confirms no false positives on clearly sharp images. Still needs *real* photo fixtures — synthetic sharp/blurred pairs confirm the algorithm responds correctly but aren't real-world calibration.
 - [x] EXIF stripping confirmed on output (no leaked GPS/device data), including proof orientation correction is applied *before* stripping (dimension swap on a 90°-tagged input) (`07-implementation-log.md` Cycle 6)
 - [x] Session store: create/read/expire session state correctly (TTL behavior), including cross-user scoping and sliding-TTL-on-activity, verified against real Redis (`07-implementation-log.md` Cycle 7)
-- [ ] Save-chat: Redis session correctly snapshotted into immutable Postgres record
+- [x] Save-chat: session data correctly snapshotted into immutable Postgres record, owner-scoped listing/view, verified against real Postgres (`07-implementation-log.md` Cycle 8). Snapshots from a `ChatMessage[]` directly, not yet from a live Redis session (no route wires the two together yet).
 
 **Edge case tests (dedicated fixture images required)**
 - [ ] **Multi-dish photo** → correctly rejected with the right error message, not silently picking one dish

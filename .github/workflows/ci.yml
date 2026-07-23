@@ -43,10 +43,16 @@ jobs:
 
       - run: pnpm --filter @lens-and-sync/shared-db run generate
 
+      - run: pnpm --filter @lens-and-sync/shared-db run migrate:deploy
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lens_and_sync_test
+
       - run: pnpm run lint
 
       - run: pnpm run typecheck
 
       - run: pnpm run test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lens_and_sync_test
 
       - run: pnpm run build

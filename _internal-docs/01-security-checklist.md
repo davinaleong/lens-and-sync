@@ -11,7 +11,7 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 - [ ] Never trust client-supplied user/role IDs — derive identity from the verified token only
 - [ ] Enforce RBAC/ABAC checks on every endpoint, not just at the route level
 - [ ] Guard against IDOR — e.g. a user can only list/view *their own* saved chats (DishLens), and DriveSync retrieval respects folder-level access scoping
-- [ ] Reject any attempt to POST/modify a saved (archived) DishLens chat — enforce immutability server-side, not just in the client
+- [ ] Reject any attempt to POST/modify a saved (archived) DishLens chat — enforce immutability server-side, not just in the client. `saveChat()` has no update path at all (`07-implementation-log.md` Cycle 8), but that's not yet an *enforced rejection* — no continue-chat endpoint exists yet that could even attempt a post-archive write, so there's nothing to assert against.
 - [ ] Handle iOS token refresh gracefully across app backgrounding — expired token returns a clean 401, not a hang or silent failure
 
 ## 2. Transport & Headers
@@ -65,8 +65,8 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 - [x] Redis session state is scoped per user/session ID — no cross-session data leakage. Enforced by the key scheme itself (`dishlens:session:{userId}:{sessionId}`) — a session ID alone can't read another user's session; unit-tested (`07-implementation-log.md` Cycle 7).
 - [x] Session TTL enforced (auto-expire inactive sessions) rather than growing Redis memory unbounded. Sliding TTL — every write refreshes `EX ttlSeconds`; verified live against real Redis expiry, not a mock (`07-implementation-log.md` Cycle 7).
-- [ ] Saved chats in Postgres are write-once — no update path exists once a chat is archived
-- [ ] `SavedChat` records are only readable by their owning user (authorization check on every list/view call)
+- [x] Saved chats in Postgres are write-once — no update path exists once a chat is archived. `saveChat()` only ever creates; there is no update function anywhere in the codebase for `SavedChat` (`07-implementation-log.md` Cycle 8).
+- [x] `SavedChat` records are only readable by their owning user (authorization check on every list/view call). `listSavedChats`/`getSavedChat` are owner-scoped and unit-tested against real Postgres with a second user (`07-implementation-log.md` Cycle 8). Not yet reachable via a route — no auth middleware to derive `userId` from.
 - [ ] Redis connection uses auth (password/ACL) and TLS if hosted externally, not an open unauthenticated instance
 
 ## 8. Abuse Prevention & Moderation

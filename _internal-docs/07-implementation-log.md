@@ -313,3 +313,69 @@ per-IP `express-rate-limit` on all routes). Session data has no schema
 validation on `content` (e.g. size cap on a single message) — not a
 concern yet since nothing writes to it in production, but will need one
 once a real caller exists.
+
+---
+
+## 2026-07-23 — Cycle 8: DishLens save-chat + list-chats (Postgres/Prisma)
+
+**What:** `apps/dish-lens/src/history/save-chat.ts` (`saveChat`) and
+`list-chats.ts` (`listSavedChats`, `getSavedChat`) implement Milestone
+#12/#13 against the existing `SavedChat` Prisma model. `saveChat` creates
+one row per snapshot; there's no update function anywhere in the codebase
+for `SavedChat`, so the write-once guarantee is enforced by that absence
+rather than a runtime check — matches the model's existing "write-once by
+convention" comment in `schema.prisma`. `getSavedChat(userId, chatId)`
+returns `null` for both "doesn't exist" and "belongs to someone else,"
+same non-leaking pattern as `session-store.ts`'s `getSession` (Cycle 7).
+`listSavedChats(userId)` is owner-scoped via `where: { userId }` — never
+returns another user's chats.
+
+**Prerequisite fixes hit along the way (both were latent, pre-existing
+gaps — this is the first cycle to actually touch `shared-db`):**
+
+1. `packages/shared-db/package.json` declares `"main": "dist/index.js"`
+   but the package only ever had `src/client.ts` — no `src/index.ts`, so
+   `import { prisma } from "@lens-and-sync/shared-db"` couldn't have
+   resolved. Added `src/index.ts` (`export * from "./client.js"`).
+2. There was no Prisma migration — `prisma/migrations/` had only a
+   `.gitkeep`, and `ci.yml` ran `prisma generate` but never `migrate
+   deploy`, so CI's Postgres service container had no schema at all.
+   Generated a real migration (`prisma migrate dev --name init` against a
+   local Postgres) and added a `migrate:deploy` step to `ci.yml` (with
+   `DATABASE_URL` pointed at the service container) between `generate` and
+   `lint`, plus `DATABASE_URL` on the `test` step so Postgres-backed tests
+   like this cycle's actually have a database to hit in CI.
+
+**Tests:** `tests/history/save-chat.test.ts` — 4 cases against a real,
+migrated local Postgres (same DB CI now actually sets up): a saved chat
+round-trips its messages/dishName exactly; `listSavedChats` returns only
+the calling user's chats, confirmed against a second real user; `
+getSavedChat` returns the chat for its owner but `null` for a different
+user; `getSavedChat` returns `null` for a nonexistent ID instead of
+throwing. Two real `User` rows are created in `beforeAll` (the `SavedChat`
+→ `User` foreign key requires one) and both the users and any created
+chats are cleaned up in `afterEach`/`afterAll` — no leftover rows.
+35/35 tests passing across the app (31 after Cycle 7 + 4 here);
+`pnpm -r run typecheck` and `pnpm -r run build` pass clean across all 9
+workspace packages.
+
+**Verified live:** ran the full suite against a temporary local Postgres
+database + Redis — all pass. Separately simulated the CI fix end-to-end:
+created a second, completely fresh database and ran `pnpm --filter
+@lens-and-sync/shared-db run migrate:deploy` against it standalone (the
+exact command now in `ci.yml`), confirming the migration applies cleanly
+with no local state to lean on. Both temporary databases and Redis were
+torn down afterward — no persistent state left running.
+
+**Not done yet:** `routes/history.ts` is still a stub — wiring real `GET
+/chats` and `GET /chats/:id` routes needs a `userId` sourced from a
+verified auth token, and `shared-auth` is still a stub. Trusting a
+client-supplied user ID here would violate `01-security-checklist.md` §1
+("never trust client-supplied user/role IDs"), so the route stays
+unwired rather than take that shortcut — same reasoning as why
+`normalizeImage` (Cycle 6) and the session store (Cycle 7) aren't wired
+into routes yet, just a different blocking prerequisite. No enforcement
+exists yet for "reject writes to an already-saved chat" at the API layer,
+because no endpoint exists yet that could attempt one — today it's true
+only because the code path doesn't exist, not because of an active check;
+that'll need a real assertion once a continue-chat endpoint exists.
