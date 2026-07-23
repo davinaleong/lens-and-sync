@@ -219,3 +219,41 @@ deployed; `shared-auth` is still a stub. No per-user upload rate limiting
 (the existing `express-rate-limit` is per-IP/global, not upload-specific).
 No Vision call, so dish detection and the edge-case rejections (#5–#7 in
 `02-milestones-checklist.md`) haven't started.
+
+---
+
+## 2026-07-23 — Cycle 6: DishLens image preprocessing (EXIF-safe re-encode)
+
+**What:** `apps/dish-lens/src/preprocessing/image-normalize.ts` now
+implements `normalizeImage(buffer)` — the piece Cycle 5 flagged as
+blocking real HEIC handling. Pipeline: `sharp(buffer).rotate()` reads the
+EXIF `Orientation` tag and bakes the correct rotation into the pixel data
+*before* anything is stripped (order matters — stripping first would
+leave sideways images with no tag left to correct them by), then re-encodes
+without calling `.withMetadata()`, which is what actually drops GPS/device
+metadata (sharp only carries EXIF/ICC/XMP forward if you ask it to keep
+them). Output format is decided by content, not by echoing the input
+format: images with an alpha channel become PNG (JPEG has no
+transparency), everything else becomes JPEG. Mirrors Cycle 5's
+`checkImageDimensions` in one respect — a real iPhone HEIC (HEVC-coded)
+still isn't decodable by this environment's libvips build, so it fails
+closed as `{ ok: false, reason: "undecodable" }` rather than throwing.
+
+**Tests:** `tests/preprocessing/image-normalize.test.ts` — 4 cases: an
+opaque JPEG with GPS EXIF data re-encodes as JPEG with `exif` confirmed
+absent from the output's own metadata; an image with an alpha channel
+re-encodes as PNG; a 40×20 image tagged EXIF orientation 6 (rotate 90°
+CW) comes out 20×40 with the orientation tag gone from the output (proves
+the rotation was actually baked into pixels, not just the tag dropped
+unapplied — the dimension swap is the tell); a non-image buffer returns
+`undecodable` instead of throwing. 22/22 passing across the app;
+`pnpm -r run typecheck` and `pnpm -r run build` pass clean across all 9
+workspace packages.
+
+**Not done yet:** not wired into `POST /upload` yet — there's nowhere for
+the re-encoded buffer to go until GCS pre-signed upload URLs exist
+(Cycle 5's leftover). Wiring it into the route today would just re-encode
+and discard the result, so it stays a tested, standalone unit until object
+storage lands. HEIC input is still practically undecodable end-to-end in
+this environment (see above) — the milestone checklist note about that
+carries forward unchanged from Cycle 5.

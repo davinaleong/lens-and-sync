@@ -24,7 +24,7 @@ Toolchain: pnpm + Turborepo (proposed default) · Pinecone · Redis · Postgres 
 ## DishLens — Dish Photo → Recipe + Nutrition API (iOS)
 
 - [x] **1. Upload endpoint** — image intake (multipart/base64), file-type validation, size/dimension limits sized for real iPhone camera output (HEIC, 10–20MB+). Live `POST /upload` route (multer multipart intake, file-type + size + pixel-dimension validation, all unit-tested and verified live) — see `07-implementation-log.md` Cycle 5. Still missing: auth, GCS pre-signed URLs, per-user rate limiting (tracked in `01-security-checklist.md` §5/§8).
-- [ ] **2. Preprocessing** — `sharp` re-encode, EXIF strip (after orientation correction), format normalization from HEIC. Blocking real-world HEIC dimension-checking — see Cycle 5's libvips/HEVC note.
+- [ ] **2. Preprocessing** — `sharp` re-encode, EXIF strip (after orientation correction), format normalization from HEIC. `normalizeImage()` implemented + unit-tested (`07-implementation-log.md` Cycle 6) — orientation-correct re-encode with EXIF stripped, JPEG/PNG output by content. Not yet wired into the route (no storage target yet); real iPhone HEIC still undecodable in this environment (Cycle 5/6 libvips/HEVC note).
 - [x] **3. Blur detection** — Laplacian variance check run *before* Vision call; reject unusable images early to save API cost. Wired live into `POST /upload`, running before any Vision call (which doesn't exist yet) — see `07-implementation-log.md` Cycles 3 & 5.
 - [ ] **4. Dish detection (Google Vision)** — label/object detection, extract candidate dish name + confidence score
 - [ ] **5. Edge case: multi-dish rejection** — multiple distinct food labels above confidence threshold → reject with clear message
