@@ -257,3 +257,59 @@ and discard the result, so it stays a tested, standalone unit until object
 storage lands. HEIC input is still practically undecodable end-to-end in
 this environment (see above) — the milestone checklist note about that
 carries forward unchanged from Cycle 5.
+
+---
+
+## 2026-07-23 — Cycle 7: DishLens Redis session store
+
+**What:** `apps/dish-lens/src/session/session-store.ts` implements
+`createSessionStore(redis, ttlSeconds)` — session creation (random UUID via
+`node:crypto`), read, message-append, and delete, all backed by Redis.
+Keys are `dishlens:session:{userId}:{sessionId}` — embedding `userId` in
+the key itself means a session ID alone is never sufficient to read
+someone else's session (`01-security-checklist.md` §7's "scoped per
+user/session ID" and §1's IDOR guard, applied at the storage layer as
+defense-in-depth beneath whatever auth check eventually calls this).
+`getSession`/`appendMessage` return `null` — not a thrown error — for
+both "doesn't exist" and "belongs to another user," so callers can't
+distinguish the two cases from the return value alone. Every write
+(`createSession`, `appendMessage`) re-sets the key with `EX ttlSeconds`,
+so the TTL slides forward on activity instead of expiring an in-use
+session on a fixed clock from creation — genuinely idle sessions still
+auto-expire via Redis's own TTL mechanism, no manual sweep needed.
+
+Like `checkImageDimensions` (Cycle 5) and `normalizeImage` (Cycle 6), this
+takes its dependencies (`redis`, `ttlSeconds`) as parameters instead of
+importing the app's `config`/singleton `redis` client directly — keeps it
+testable against a real test Redis without needing the full env schema
+(`JWT_ACCESS_SECRET`, `ANTHROPIC_API_KEY`, etc.) loaded just to run a unit
+test.
+
+**Tests:** `tests/session/session-store.test.ts` — 9 cases against a real
+local Redis (same one CI already runs as a service container, and that
+`infra/docker-compose.yml` provides for local dev — TTL/expiry behavior
+isn't trustworthy against a mock): create/read round-trip, ordered
+message append with timestamps, cross-user read returns `null` (not the
+other user's data), nonexistent-session read/append both return `null`
+rather than throwing, real TTL expiry after the window elapses (1s TTL,
+1.3s wait), sliding TTL confirmed by writing at the 600ms mark of a 1s TTL
+and finding the session still alive 600ms after that (would've expired on
+a fixed clock from creation), and explicit delete. 31/31 passing across
+the app; `pnpm -r run typecheck` and `pnpm -r run build` pass clean across
+all 9 workspace packages.
+
+**Verified live:** ran the full suite (including the two timing-dependent
+tests) against a temporary local Redis on the default port (6379, matching
+`ci.yml`'s service container) — all 9 pass, including the two Redis
+round-trips actually blocking on real `EXPIRE` behavior rather than fake
+timers. Redis was shut down afterward.
+
+**Not done yet:** no route wiring — there's no Vision integration yet to
+generate the dish-detection turn that would start a real session, so
+`createSession`/`appendMessage` have no caller yet (same "tested unit,
+nothing to plug it into yet" situation as Cycle 6's `normalizeImage`).
+No abuse/rate-limit on session creation itself (distinct from the existing
+per-IP `express-rate-limit` on all routes). Session data has no schema
+validation on `content` (e.g. size cap on a single message) — not a
+concern yet since nothing writes to it in production, but will need one
+once a real caller exists.

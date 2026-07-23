@@ -63,8 +63,8 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 7. Session & Chat History (Redis + Postgres)
 
-- [ ] Redis session state is scoped per user/session ID — no cross-session data leakage
-- [ ] Session TTL enforced (auto-expire inactive sessions) rather than growing Redis memory unbounded
+- [x] Redis session state is scoped per user/session ID — no cross-session data leakage. Enforced by the key scheme itself (`dishlens:session:{userId}:{sessionId}`) — a session ID alone can't read another user's session; unit-tested (`07-implementation-log.md` Cycle 7).
+- [x] Session TTL enforced (auto-expire inactive sessions) rather than growing Redis memory unbounded. Sliding TTL — every write refreshes `EX ttlSeconds`; verified live against real Redis expiry, not a mock (`07-implementation-log.md` Cycle 7).
 - [ ] Saved chats in Postgres are write-once — no update path exists once a chat is archived
 - [ ] `SavedChat` records are only readable by their owning user (authorization check on every list/view call)
 - [ ] Redis connection uses auth (password/ACL) and TLS if hosted externally, not an open unauthenticated instance

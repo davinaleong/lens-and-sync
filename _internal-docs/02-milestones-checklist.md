@@ -32,7 +32,7 @@ Toolchain: pnpm + Turborepo (proposed default) · Pinecone · Redis · Postgres 
 - [ ] **7. Edge case: low Vision-confidence rejection** — distinct from blur rejection (covers poor lighting/odd angle cases that pass the blur check but Vision still can't confidently identify)
 - [ ] **8. Recipe generation** — Anthropic Claude call using identified dish, ingredient list + steps, home-kitchen feasibility constraints (see `06-toolchain-decisions.md`)
 - [ ] **9. Nutrition info** — Edamam lookup matched to generated ingredients
-- [ ] **10. Session management (Redis)** — session creation/expiry (TTL-based), session-scoped message state, session ID issuance
+- [x] **10. Session management (Redis)** — session creation/expiry (TTL-based), session-scoped message state, session ID issuance. `createSessionStore()` implemented + unit-tested against real Redis, including live TTL/sliding-expiration behavior (`07-implementation-log.md` Cycle 7). Not yet wired into a route — no Vision integration exists yet to start a real session.
 - [ ] **11. Response assembly** — structured chat response appended to Redis session; consistent error schema across all rejection paths
 - [ ] **12. Save-chat flow (Postgres/Prisma)** — snapshot Redis session → immutable `SavedChat` record (JSONB messages); reject any write attempt to an already-saved chat
 - [ ] **13. History listing** — list user's saved chats + read-only view-saved-chat endpoint
