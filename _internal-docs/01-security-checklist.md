@@ -72,7 +72,7 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 ## 8. Abuse Prevention & Moderation
 
 - [x] Rate-limit API requests per IP/user/API key (`express-rate-limit` + `rate-limit-redis`, live on both apps — see `07-implementation-log.md` Cycle 2)
-- [ ] Rate-limit image uploads per user (count and bandwidth) — iOS clients may retry aggressively on poor cellular connections, so limits need to tolerate legitimate retries without allowing abuse
+- [ ] Rate-limit image uploads per user (count and bandwidth) — iOS clients may retry aggressively on poor cellular connections, so limits need to tolerate legitimate retries without allowing abuse. Count-based limiting live on `POST /upload`, Redis-backed, keyed on verified `userId` (not IP), verified live including cross-user isolation (`07-implementation-log.md` Cycle 10). Bandwidth-based limiting not done.
 - [ ] Run uploaded images through a moderation pipeline (NSFW/inappropriate content detection) before processing — reuses the Google Vision SafeSearch annotation, no separate provider (see `06-toolchain-decisions.md`)
 - [ ] Provide report/block/delete mechanisms for saved chats and images
 

@@ -35,6 +35,9 @@ const schema = z.object({
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number(),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number(),
+
+  UPLOAD_RATE_LIMIT_WINDOW_MS: z.coerce.number(),
+  UPLOAD_RATE_LIMIT_MAX_UPLOADS: z.coerce.number(),
 });
 
 export type Config = z.infer<typeof schema>;

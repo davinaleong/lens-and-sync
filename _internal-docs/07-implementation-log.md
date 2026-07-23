@@ -455,3 +455,59 @@ still unauthenticated — wiring `requireAuth` there too is a natural next
 step now that the middleware exists, but is deliberately left for its own
 cycle rather than bundled in here. No RBAC/ABAC beyond "is this a valid
 token for some user."
+
+---
+
+## 2026-07-23 — Cycle 10: authenticate + per-user rate-limit `POST /upload`
+
+**What:** Closed the leftover flagged at the end of Cycle 9. `POST
+/upload` now runs `requireAuth(config.JWT_ACCESS_SECRET)` first — before
+`multer` even touches the request body, so an unauthenticated request
+never pays for multipart parsing — followed by a new per-user rate
+limiter, then the existing multer/`assessUpload` pipeline unchanged.
+
+The per-user limiter (Milestone #14, `01-security-checklist.md` §8's
+"Rate-limit image uploads per user... iOS clients may retry aggressively
+on poor cellular connections, so limits need to tolerate legitimate
+retries without allowing abuse") is deliberately separate from the
+existing global per-IP `express-rate-limit` in `index.ts` (Cycle 2):
+same libraries (`express-rate-limit` + `rate-limit-redis`), but keyed on
+the verified `req.userId` instead of IP — IP is a poor proxy for "one
+user" behind carrier-grade NAT on cellular, which is exactly the
+population this limit needs to not accidentally punish. New config:
+`UPLOAD_RATE_LIMIT_WINDOW_MS` / `UPLOAD_RATE_LIMIT_MAX_UPLOADS` (default
+20 uploads / 10 minutes — generous enough for retry storms, still a real
+cap), and a distinct Redis key prefix (`dishlens:upload-rl:`) so it can't
+collide with the global limiter's counters.
+
+**Also fixed while touching this route:** `express-rate-limit`'s default
+429 response is a plain-text body ("Too many requests, please try again
+later."), inconsistent with every other rejection on this route, which
+returns `{ error: { code, message } }` JSON. Added a custom `handler` so
+rate-limit rejections match the same shape — closes a small piece of
+Milestone #11's "consistent error schema across all rejection paths" that
+was sitting there unnoticed since Cycle 2 first introduced the global
+limiter (that one still has the default plain-text body; out of scope
+for this cycle, noted below).
+
+**Verified live** (no new automated test — matches Cycle 2's precedent
+for this same library pairing, where the actual rate-limiting behavior
+was verified live rather than unit-tested, since it needs a real Express
+app + real Redis + real timing to mean anything): temporary local Redis +
+compiled app, `UPLOAD_RATE_LIMIT_MAX_UPLOADS` set to `3` for a fast
+check. No `Authorization` header → `401` before multer runs (confirmed no
+multipart parsing happens first). A garbage token → the same `401`.
+Uploads 1–3 from one signed-in user succeed (`200`); upload 4 from the
+*same* user → `429` with the new JSON shape
+(`{"error":{"code":"rate-limited","message":"Too many uploads. Please
+wait before trying again."}}`). A *different* user's token uploading
+immediately after → `200`, confirming the limit is genuinely per-user,
+not accidentally global. Redis, the app process, and the temporary `.env`
+were all torn down afterward.
+
+**Not done yet:** the pre-existing global per-IP limiter (Cycle 2) still
+returns the default plain-text 429 body — left as-is rather than expanded
+scope; worth a follow-up for full schema consistency. No bandwidth-based
+limiting (checklist mentions "count and bandwidth" — this cycle only
+covers count). Moderation (NSFW/SafeSearch) still blocked on Vision
+credentials, same as every cycle since 5.

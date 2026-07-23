@@ -1,7 +1,11 @@
+import { requireAuth, type AuthenticatedRequest } from "@lens-and-sync/shared-auth";
 import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
+import { rateLimit } from "express-rate-limit";
 import multer from "multer";
+import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { config } from "../config.js";
+import { redis } from "../session/redis-client.js";
 import { assessUpload, type UploadAssessment } from "../upload/index.js";
 
 export const uploadRouter: Router = Router();
@@ -11,6 +15,30 @@ const maxSizeBytes = config.MAX_UPLOAD_SIZE_MB * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: maxSizeBytes, files: 1 },
+});
+
+// Per-user, distinct from the global per-IP limiter in index.ts - keyed on
+// the verified userId (never an IP, which is a poor proxy for "one user" on
+// shared/carrier-NAT cellular networks) so it runs *after* requireAuth.
+const uploadRateLimiter = rateLimit({
+  windowMs: config.UPLOAD_RATE_LIMIT_WINDOW_MS,
+  max: config.UPLOAD_RATE_LIMIT_MAX_UPLOADS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: AuthenticatedRequest) => req.userId as string,
+  // Match this route's own JSON error shape instead of express-rate-limit's
+  // default plain-text body - one consistent error schema across every
+  // rejection path on this route (`02-milestones-checklist.md` #11).
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: { code: "rate-limited", message: "Too many uploads. Please wait before trying again." },
+    });
+  },
+  store: new RedisStore({
+    prefix: "dishlens:upload-rl:",
+    sendCommand: (...args: string[]) =>
+      redis.call(args[0] as string, ...args.slice(1)) as Promise<RedisReply>,
+  }),
 });
 
 // Fixed, non-leaky messages per rejection reason - never echo internal
@@ -24,40 +52,46 @@ const REJECTION_RESPONSES: Record<Exclude<UploadAssessment, { ok: true }>["reaso
   "too-blurry": { status: 422, message: "Uploaded image is too blurry to process. Please retake the photo." },
 };
 
-uploadRouter.post("/", upload.single("image"), async (req, res, next) => {
-  try {
-    if (!req.file) {
-      res.status(400).json({ error: { code: "no-file", message: "No image file was provided." } });
-      return;
+uploadRouter.post(
+  "/",
+  requireAuth(config.JWT_ACCESS_SECRET),
+  uploadRateLimiter,
+  upload.single("image"),
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: { code: "no-file", message: "No image file was provided." } });
+        return;
+      }
+
+      const assessment = await assessUpload(req.file.buffer, {
+        maxSizeBytes,
+        maxDimensionPx: config.MAX_IMAGE_DIMENSION_PX,
+        blurVarianceThreshold: config.BLUR_VARIANCE_THRESHOLD,
+      });
+
+      if (!assessment.ok) {
+        const response = REJECTION_RESPONSES[assessment.reason];
+        res.status(response.status).json({ error: { code: assessment.reason, message: response.message } });
+        return;
+      }
+
+      // TODO: Vision dish detection + edge-case rejection, recipe/nutrition
+      // generation, Redis session creation - all need live credentials that
+      // don't exist yet. A validated image is acknowledged for now so the
+      // pipeline up to this point can be exercised end-to-end.
+      res.status(200).json({
+        status: "accepted",
+        mimeType: assessment.mimeType,
+        sizeBytes: assessment.sizeBytes,
+        width: assessment.width,
+        height: assessment.height,
+      });
+    } catch (err) {
+      next(err);
     }
-
-    const assessment = await assessUpload(req.file.buffer, {
-      maxSizeBytes,
-      maxDimensionPx: config.MAX_IMAGE_DIMENSION_PX,
-      blurVarianceThreshold: config.BLUR_VARIANCE_THRESHOLD,
-    });
-
-    if (!assessment.ok) {
-      const response = REJECTION_RESPONSES[assessment.reason];
-      res.status(response.status).json({ error: { code: assessment.reason, message: response.message } });
-      return;
-    }
-
-    // TODO: Vision dish detection + edge-case rejection, recipe/nutrition
-    // generation, Redis session creation - all need live credentials that
-    // don't exist yet. A validated image is acknowledged for now so the
-    // pipeline up to this point can be exercised end-to-end.
-    res.status(200).json({
-      status: "accepted",
-      mimeType: assessment.mimeType,
-      sizeBytes: assessment.sizeBytes,
-      width: assessment.width,
-      height: assessment.height,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+  },
+);
 
 const handleUploadError: ErrorRequestHandler = (err, _req, res, next) => {
   if (res.headersSent) {
