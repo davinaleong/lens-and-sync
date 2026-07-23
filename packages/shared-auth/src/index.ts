@@ -1,2 +1,2 @@
-// TODO: JWT verification middleware; derives identity from verified token only, never client-supplied IDs
-export {};
+export * from "./middleware.js";
+export * from "./verify.js";

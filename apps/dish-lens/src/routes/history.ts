@@ -1,6 +1,49 @@
+import { requireAuth, type AuthenticatedRequest } from "@lens-and-sync/shared-auth";
+import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
+import { config } from "../config.js";
+import { getSavedChat, listSavedChats } from "../history/list-chats.js";
 
 export const historyRouter: Router = Router();
 
-// TODO: list saved chats for the authenticated user
-// TODO: read-only view of a single saved chat
+historyRouter.use(requireAuth(config.JWT_ACCESS_SECRET));
+
+historyRouter.get("/", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    // requireAuth has already run and called next() only on success, so
+    // req.userId is guaranteed set here.
+    const chats = await listSavedChats(req.userId as string);
+    res.status(200).json({ chats });
+  } catch (err) {
+    next(err);
+  }
+});
+
+historyRouter.get("/:chatId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const chatId = req.params.chatId;
+    if (!chatId) {
+      res.status(400).json({ error: { code: "invalid-request", message: "A chat ID is required." } });
+      return;
+    }
+
+    const chat = await getSavedChat(req.userId as string, chatId);
+    if (!chat) {
+      res.status(404).json({ error: { code: "not-found", message: "Saved chat not found." } });
+      return;
+    }
+    res.status(200).json({ chat });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const handleHistoryError: ErrorRequestHandler = (err, _req, res, next) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  res.status(500).json({ error: { code: "internal-error", message: "An unexpected error occurred." } });
+};
+
+historyRouter.use(handleHistoryError);

@@ -44,6 +44,7 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 - [x] EXIF stripping confirmed on output (no leaked GPS/device data), including proof orientation correction is applied *before* stripping (dimension swap on a 90°-tagged input) (`07-implementation-log.md` Cycle 6)
 - [x] Session store: create/read/expire session state correctly (TTL behavior), including cross-user scoping and sliding-TTL-on-activity, verified against real Redis (`07-implementation-log.md` Cycle 7)
 - [x] Save-chat: session data correctly snapshotted into immutable Postgres record, owner-scoped listing/view, verified against real Postgres (`07-implementation-log.md` Cycle 8). Snapshots from a `ChatMessage[]` directly, not yet from a live Redis session (no route wires the two together yet).
+- [x] JWT verification: valid token accepted and `userId` extracted correctly; missing/expired/wrong-secret/malformed(no-`sub`)/non-JWT tokens all rejected with the correct internal reason but an identical external `401` (`07-implementation-log.md` Cycle 9)
 
 **Edge case tests (dedicated fixture images required)**
 - [ ] **Multi-dish photo** → correctly rejected with the right error message, not silently picking one dish

@@ -379,3 +379,79 @@ exists yet for "reject writes to an already-saved chat" at the API layer,
 because no endpoint exists yet that could attempt one — today it's true
 only because the code path doesn't exist, not because of an active check;
 that'll need a real assertion once a continue-chat endpoint exists.
+
+---
+
+## 2026-07-23 — Cycle 9: `shared-auth` JWT verification + live `GET /chats` routes
+
+**What:** Three cycles in a row (6, 7, 8) hit the same wall — a
+credential-independent piece was built and tested but couldn't be wired
+into a live route because there was no verified way to get `userId`
+without trusting client input. This cycle removes that wall for the read
+side: `packages/shared-auth` now implements real JWT **verification**
+(not issuance — see scope note below):
+
+- `verify.ts` — `verifyAccessToken(token, secret)` checks signature and
+  expiry via `jsonwebtoken`, extracts `userId` from the `sub` claim, and
+  returns a discriminated result (`missing` / `malformed` / `expired` /
+  `invalid` / `ok`). This is the only place `userId` is allowed to come
+  from anywhere downstream.
+- `middleware.ts` — `requireAuth(secret)` returns Express middleware that
+  extracts a `Bearer` token from `Authorization`, verifies it, and either
+  attaches `req.userId` and calls `next()`, or returns a **single, fixed**
+  `401 { error: { code: "unauthorized", message: "Authentication
+  required." } }` — deliberately the same shape regardless of *why*
+  verification failed, so a client (or attacker) can't distinguish
+  expired/malformed/invalid/missing from the response
+  (`01-security-checklist.md` §1's clean-401-for-iOS-refresh requirement).
+
+`routes/history.ts` (Milestone #13, previously blocked in Cycle 8) is now
+a real route: `historyRouter.use(requireAuth(config.JWT_ACCESS_SECRET))`
+gates both `GET /chats` (→ `listSavedChats`) and `GET /chats/:chatId` (→
+`getSavedChat`), reading `req.userId` — never anything client-supplied —
+as the identity for every Prisma call. A JSON error-handling middleware
+(same pattern as Cycle 5's upload route) catches anything unexpected
+rather than leaking a stack trace.
+
+**Scope note:** this is verification only — no login/signup/token-issuance
+endpoint, no refresh-token rotation/storage (the `RefreshToken` Prisma
+model exists but nothing writes to it yet), no RBAC/ABAC. Those are
+separate, larger pieces of `01-security-checklist.md` §1 and stay
+unstarted; this cycle only unblocks routes that need to know *who's
+asking*, not routes that need to log someone in.
+
+**Prerequisite fix:** `shared-auth` had `jsonwebtoken` as a dependency but
+no `test` script, no `vitest`, and no `@types/express` (needed for the
+middleware's `Request`/`Response`/`NextFunction` types) — added all three,
+matching the `test`/`vitest` convention already used by `shared-config`.
+
+**Tests:** `packages/shared-auth/tests/verify.test.ts` (6 cases: valid
+token round-trips to the right `userId`, missing/expired/wrong-secret/
+non-JWT/no-`sub` all rejected with the correct distinct *internal* reason)
+and `middleware.test.ts` (4 cases, using hand-built mock `req`/`res`
+objects rather than a new test-server dependency: valid token attaches
+`userId` and calls `next()`; missing header, expired token, and a
+non-`Bearer` scheme all return the identical 401 shape and never call
+`next()`). 10/10 passing. `pnpm -r run typecheck` and `pnpm -r run build`
+pass clean across all 9 workspace packages.
+
+**Verified live end-to-end** (not just unit tests): stood up a temporary
+local Postgres (migrated) + Redis, seeded two real `User` rows and one
+`SavedChat` owned by the first, signed real JWTs for each user with
+`jsonwebtoken` against the app's actual `JWT_ACCESS_SECRET`, ran the
+compiled app, and drove `GET /chats` and `GET /chats/:chatId` with curl:
+no `Authorization` header → `401`; a garbage token → the identical `401`;
+owner listing their own chat → `200` with the chat; the *other* user
+listing → `200 { chats: [] }` (correctly empty, not an error); the other
+user requesting the first user's chat ID directly → `404` — the exact
+same shape as a genuinely nonexistent ID, confirming no cross-user
+existence leak. All temporary infra torn down afterward (databases
+dropped, Redis and the app process stopped, `.env` deleted).
+
+**Not done yet:** no login/token-issuance/refresh-rotation (see scope
+note above) — there's still no way for a real client to *obtain* an
+access token, only to have one verified. `POST /upload` (Cycle 5) is
+still unauthenticated — wiring `requireAuth` there too is a natural next
+step now that the middleware exists, but is deliberately left for its own
+cycle rather than bundled in here. No RBAC/ABAC beyond "is this a valid
+token for some user."
