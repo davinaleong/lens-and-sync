@@ -7,10 +7,16 @@ import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { config } from "../config.js";
 import { classifyDish, type DishClassification } from "../edge-cases/index.js";
 import { checkModeration } from "../moderation/index.js";
+import { lookupNutrition } from "../nutrition/index.js";
+import { anthropicClient } from "../recipe/client.js";
+import { generateRecipe } from "../recipe/index.js";
 import { redis } from "../session/redis-client.js";
+import { createSessionStore } from "../session/session-store.js";
 import { assessUpload, type UploadAssessment } from "../upload/index.js";
 import { visionClient } from "../vision/client.js";
 import { analyzeImage } from "../vision/index.js";
+
+const sessionStore = createSessionStore(redis, config.REDIS_SESSION_TTL_SECONDS);
 
 export const uploadRouter: Router = Router();
 
@@ -67,7 +73,7 @@ uploadRouter.post(
   requireAuth(config.JWT_ACCESS_SECRET),
   uploadRateLimiter,
   upload.single("image"),
-  async (req, res, next) => {
+  async (req: AuthenticatedRequest, res, next) => {
     try {
       if (!req.file) {
         res.status(400).json({ error: { code: "no-file", message: "No image file was provided." } });
@@ -110,12 +116,46 @@ uploadRouter.post(
         return;
       }
 
-      // TODO: recipe generation, nutrition lookup, Redis session creation -
-      // still separate cycles. A confirmed dish is acknowledged for now so
-      // the pipeline up to this point can be exercised end-to-end.
+      const recipeResult = await generateRecipe(anthropicClient, config.ANTHROPIC_MODEL, classification.dishName);
+      if (!recipeResult.ok) {
+        res.status(502).json({
+          error: {
+            code: "recipe-generation-failed",
+            message: "Could not generate a recipe for this dish. Please try again.",
+          },
+        });
+        return;
+      }
+      const { recipe } = recipeResult;
+
+      // Nutrition is a best-effort enrichment, not a gate - Edamam being
+      // down/rate-limited shouldn't block the core recipe result the user
+      // actually asked for. Logged server-side so a persistent outage is
+      // still visible, but the client just gets `nutrition: null`.
+      const nutritionResult = await lookupNutrition(
+        fetch,
+        { appId: config.NUTRITION_API_APP_ID, appKey: config.NUTRITION_API_APP_KEY },
+        recipe.dishName,
+        recipe.ingredients,
+      );
+      if (!nutritionResult.ok) {
+        console.error(`Nutrition lookup failed (${nutritionResult.reason}) for dish "${recipe.dishName}" - continuing without nutrition data.`);
+      }
+      const nutrition = nutritionResult.ok ? nutritionResult.nutrition : null;
+
+      const userId = req.userId as string;
+      const session = await sessionStore.createSession(userId);
+      await sessionStore.appendMessage(userId, session.sessionId, {
+        role: "assistant",
+        content: JSON.stringify({ dishName: classification.dishName, confidence: classification.confidence, recipe, nutrition }),
+      });
+
       res.status(200).json({
         status: "accepted",
+        sessionId: session.sessionId,
         dishName: classification.dishName,
+        recipe,
+        nutrition,
         mimeType: assessment.mimeType,
         sizeBytes: assessment.sizeBytes,
         width: assessment.width,

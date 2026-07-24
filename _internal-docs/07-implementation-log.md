@@ -775,3 +775,78 @@ a single pass, not three separate partial wirings of the same route.
 session, wired into `POST /upload`) and Milestone #10's remaining gap
 (session creation actually called) are next. No caching/dedup of repeated
 Edamam lookups for the same dish - each request re-hits the live API.
+
+---
+
+## 2026-07-24 — Cycle 14: DishLens response assembly (recipe + nutrition + session)
+
+**What:** `POST /upload` now wires together everything built standalone in
+Cycles 7 and 11–13 into one coherent response - Milestone #10's remaining
+gap (`createSessionStore` finally has a caller) and Milestone #11
+("Response assembly"). After a successful `classifyDish`:
+
+1. `generateRecipe()` (Cycle 12) generates a recipe for the identified
+   dish. Failure here (`invalid-response` - Claude returned something the
+   `zod` schema rejects) returns a `502 { code: "recipe-generation-failed"
+   }` - a genuine upstream-dependency failure, not a client input problem,
+   so it gets a 5xx rather than joining the 422 rejection family.
+2. `lookupNutrition()` (Cycle 13) looks up nutrition for the *actual
+   generated ingredients* (not the raw dish name), matching Milestone #9's
+   "matched to generated ingredients" wording literally. **Deliberately
+   best-effort, not a gate**: if Edamam fails for any reason (rate limit,
+   outage, a dish whose ingredients don't parse), the response still
+   returns with `nutrition: null` rather than failing the whole request -
+   a flaky third-party nutrition lookup shouldn't take down the core
+   recipe result the user actually asked for. The failure reason is logged
+   server-side (`console.error`) so a persistent outage stays visible.
+3. `sessionStore.createSession(userId)` + `appendMessage(...)` (Cycle 7)
+   persists one assistant turn - `content` is a JSON string of `{
+   dishName, confidence, recipe, nutrition }` - keyed by the verified
+   `req.userId`, never a client-supplied ID.
+
+The final `200` response now returns `{ status, sessionId, dishName,
+recipe, nutrition, mimeType, sizeBytes, width, height }` instead of the
+acknowledgment-only stub from Cycles 5/11.
+
+**Verified live** (real Vision, real Claude, real Edamam, real Redis - no
+mocks anywhere in this verification): two checks, since no real dish photo
+exists to drive a full `200` through the actual HTTP route (the standing
+gap since Cycle 3).
+
+1. HTTP-level, via the real running app: the same synthetic checkerboard
+   image from Cycle 11 still returns `422 non-dish` - confirms the new
+   recipe/nutrition/session code added *after* the classification gate is
+   never reached on a rejection (cost-ordering preserved, no wasted Claude/
+   Edamam calls on a photo that was never a dish to begin with).
+2. Assembly-chain level, via a standalone script calling the exact same
+   sequence of real dependencies the route now calls, in the same order,
+   threading real data between them: real `generateRecipe()` for "Chicken
+   Caesar Salad" (returned 16 ingredients, 11 steps) → real
+   `lookupNutrition()` fed those exact 16 generated ingredient strings
+   (returned real aggregated macros) → real Redis `createSession` +
+   `appendMessage` with the combined payload as `content` → `getSession`
+   read-back confirmed the persisted JSON round-trips correctly → session
+   deleted afterward. This proves the assembly logic itself is correct
+   against live infrastructure, even though the HTTP-level `200` path
+   specifically (going through a real Vision dish match) remains unverified
+   pending a real dish-photo fixture.
+
+**Tests:** no new automated tests this cycle - `generateRecipe`,
+`lookupNutrition`, and `createSessionStore` are already unit-tested
+individually (Cycles 7, 12, 13), and the route-level assembly is Express
+wiring with no new pure logic to unit-test in isolation (matches the
+precedent set in Cycles 9/10, where route-level behavior was verified live
+rather than with a new test file). 70/70 pre-existing tests still passing;
+`pnpm -r run typecheck` and `pnpm -r run build` pass clean across all 9
+workspace packages.
+
+**Not done yet:** no real dish-photo fixture exists to drive a true
+end-to-end `200` through the live HTTP route (recurring gap, unchanged).
+No caching of the Redis session ID back to the client beyond the response
+body - there's no follow-up endpoint yet that would let a client continue
+a conversation using it (`appendMessage` has no second caller). Nutrition
+failures are silently swallowed into `null` from the client's perspective -
+no `nutritionAvailable: false`-style flag distinguishing "no nutrition data
+returned" from "lookup failed," which a real iOS client would likely want
+to render differently. Save-chat (Cycle 8) still isn't wired to this flow
+- there's no endpoint yet that snapshots a live session into a `SavedChat`.

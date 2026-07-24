@@ -59,7 +59,7 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 - [x] Vision low-confidence-but-not-blurry (e.g. poor lighting, odd angle) → rejected via confidence threshold, distinct error message from the blur rejection. Unit-tested (`07-implementation-log.md` Cycle 11) against synthetic label sets with food-category evidence but no specific label clearing the threshold; no real poor-lighting photo fixture yet.
 
 **Integration tests**
-- [ ] End-to-end: valid dish photo → recipe + nutrition returned with correct structure
+- [ ] End-to-end: valid dish photo → recipe + nutrition returned with correct structure. `POST /upload`'s assembly logic (recipe → nutrition → session) is verified live end-to-end via a standalone script chaining the real APIs (`07-implementation-log.md` Cycle 14), but no real dish photo exists yet to drive this through the actual HTTP route and a real Vision classification.
 - [ ] Vision API real call against fixture set (not mocked) at least in staging, to catch drift in label naming/confidence over time
 - [x] Nutrition data matches expected ranges for known test dishes (sanity bounds, not exact match). Real live call for an 8-serving Margherita Pizza returned ~2175 total kcal (~272 kcal/serving) — a plausible sanity-bound result, spot-checked once (`07-implementation-log.md` Cycle 13), not across a broader known-dish test set.
 - [ ] Recipe feasibility: no exotic equipment/ingredients in generated recipes (spot-check against a rubric). One real Claude-generated recipe (Margherita Pizza) was spot-checked live and held up - grocery-store ingredients, standard oven/baking-sheet equipment (`07-implementation-log.md` Cycle 12) - but this is a single manual sample, not a rubric applied across a real test set.
