@@ -48,6 +48,7 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 - [x] Vision label mapping: `analyzeImage()` correctly maps mocked label/SafeSearch annotations, requests both feature types in one call, and defaults sanely when Vision returns nothing (`07-implementation-log.md` Cycle 11, mocked client - no live network in the test suite)
 - [x] Moderation: SafeSearch likelihood table (`LIKELY`/`VERY_LIKELY` blocks per category, `POSSIBLE` and medical/spoof never block) (`07-implementation-log.md` Cycle 11)
 - [x] Dish classification heuristic: single dish accepted, two distinct dishes → multi-dish, raw ingredients → non-dish, empty plate/person/unrelated object → non-dish, generic-evidence-only → low-confidence, dish-with-garnish → still accepted (`07-implementation-log.md` Cycle 11) — against hand-built label arrays, not real Vision output
+- [x] Recipe generation: well-formed JSON round-trips correctly, dish name/model passed through to the API call, non-JSON and incomplete-JSON responses both reject as `invalid-response` (`07-implementation-log.md` Cycle 12) — against a mocked Anthropic client
 
 **Edge case tests (dedicated fixture images required)**
 - [x] **Multi-dish photo** → correctly rejected with the right error message, not silently picking one dish. Logic implemented and unit-tested against synthetic label sets (`07-implementation-log.md` Cycle 11); no real multi-dish photo fixture exists yet to confirm real-world Vision output triggers it correctly.
@@ -60,7 +61,7 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 - [ ] End-to-end: valid dish photo → recipe + nutrition returned with correct structure
 - [ ] Vision API real call against fixture set (not mocked) at least in staging, to catch drift in label naming/confidence over time
 - [ ] Nutrition data matches expected ranges for known test dishes (sanity bounds, not exact match)
-- [ ] Recipe feasibility: no exotic equipment/ingredients in generated recipes (spot-check against a rubric)
+- [ ] Recipe feasibility: no exotic equipment/ingredients in generated recipes (spot-check against a rubric). One real Claude-generated recipe (Margherita Pizza) was spot-checked live and held up - grocery-store ingredients, standard oven/baking-sheet equipment (`07-implementation-log.md` Cycle 12) - but this is a single manual sample, not a rubric applied across a real test set.
 - [ ] Save-chat → list-chats → view-chat flow returns correct, immutable data
 - [ ] Attempting to POST a new message into a saved (archived) chat ID is rejected
 

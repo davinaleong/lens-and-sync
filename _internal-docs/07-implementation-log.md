@@ -641,3 +641,71 @@ the same credential landing but not started this cycle. No session
 creation on a successful classification yet — `createSessionStore` (Cycle
 7) still has no caller. Object storage / pre-signed GCS URLs (Milestone #1
 leftover) still not done.
+
+---
+
+## 2026-07-24 — Cycle 12: DishLens recipe generation (Anthropic Claude)
+
+**What:** `src/recipe/index.ts` implements `generateRecipe(client, model,
+dishName)` — Milestone #8. One Claude call per dish name, with a system
+prompt carrying the home-kitchen feasibility constraints directly (grocery-
+store ingredients only, standard equipment only, no specialty gear) and
+instructing strict JSON-only output (no markdown fences, no commentary).
+The response text is parsed and validated against a `zod` schema
+(`recipeSchema`: non-empty `dishName`, non-empty `ingredients`/`steps`
+arrays) rather than trusted as-is — an LLM can still reply with prose, a
+truncated object, or a shape that merely happens to parse as JSON, so the
+schema check is what actually gates acceptance, not just `JSON.parse`
+succeeding. Both failure modes (non-JSON text, JSON missing required
+fields) collapse to the same `{ ok: false, reason: "invalid-response" }` -
+callers don't need to distinguish "Claude explained itself instead of
+returning JSON" from "Claude returned malformed JSON." Same
+dependency-injection shape as `vision/index.ts`'s `VisionAnnotateClient`:
+`RecipeClient` is `Pick<Anthropic, "messages">`, so tests never touch the
+network, and `src/recipe/client.ts` holds the one real singleton
+(`new Anthropic({ apiKey: config.ANTHROPIC_API_KEY })`) for the route layer
+to eventually import.
+
+**Tests:** `tests/recipe/generate-recipe.test.ts` — 5 cases against a
+hand-built fake client: well-formed JSON round-trips to the exact recipe
+object; the dish name and configured model are confirmed passed through to
+the actual API call; conversational (non-JSON) text, well-formed-but-
+incomplete JSON, and a response with no text content block at all (e.g. a
+pure tool-use block) all correctly reject as `invalid-response`. 63/63
+tests passing across the app (58 after Cycle 11 + 5 here — one pre-existing
+file, `save-chat.test.ts`, still needs a running local Postgres, unchanged
+from every prior cycle). `pnpm -r run typecheck` and `pnpm -r run build`
+pass clean across all 9 workspace packages.
+
+**Verified live** (real Anthropic API, first cycle able to): the initial
+attempt hit a second real account-level blocker in a row — `400
+invalid_request_error`, "Your credit balance is too low to access the
+Anthropic API." Same handling as Cycle 11's Vision-not-enabled blocker:
+flagged to the user rather than working around it (adding billing credits
+is the user's account action, not something this session should do
+unilaterally). The user added credits; a real call to `generateRecipe`
+against `claude-sonnet-5` for "Margherita Pizza" then returned a genuine,
+well-formed, home-kitchen-feasible 10-step recipe with ordinary grocery
+ingredients and standard equipment (oven, baking sheet/stone) - both the
+JSON-only instruction and the feasibility constraints held on a real
+model response, not just in the mocked unit tests.
+
+**Deliberately not wired into a route yet:** unlike Cycles 3–10 (which
+usually wired a new capability into `POST /upload` the same cycle it was
+built), this one stays a tested, standalone unit on purpose. Milestone #11
+("Response assembly") calls for one coherent structured chat response
+combining recipe generation *and* nutrition lookup (Milestone #9, Edamam -
+not started) *and* Redis session creation (Cycle 7's `createSessionStore`,
+still uncalled) into a single response appended to the session. Wiring
+recipe generation alone into the route now would mean re-touching the same
+response-assembly code twice (once for recipe-only, again once nutrition
+lands) for no benefit - better to build nutrition next and assemble both
+into the route in one dedicated cycle.
+
+**Not done yet:** nutrition lookup (Edamam, Milestone #9) - separate
+credentials already sitting unused in `.env` since before this cycle.
+Session creation on a successful classification (Milestone #10's remaining
+gap). No automated check for recipe feasibility beyond the system prompt
+itself - `04-testing-checklist.md`'s "spot-check against a rubric" for
+exotic equipment/ingredients is inherently a manual/qualitative check, not
+something this cycle automated.
