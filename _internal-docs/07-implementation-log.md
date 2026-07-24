@@ -511,3 +511,133 @@ scope; worth a follow-up for full schema consistency. No bandwidth-based
 limiting (checklist mentions "count and bandwidth" — this cycle only
 covers count). Moderation (NSFW/SafeSearch) still blocked on Vision
 credentials, same as every cycle since 5.
+
+---
+
+## 2026-07-24 — Cycle 11: Google Vision dish detection + edge cases + moderation
+
+**What:** Real credentials for Vision/Anthropic/Edamam landed in
+`apps/dish-lens/.env` since Cycle 10 (previously every cycle was blocked by
+"no credentials exist regardless" — see `05-progress.md`). This cycle spends
+that unblock on Milestone #4–#7: a live Google Vision integration.
+
+- `src/vision/index.ts` — `analyzeImage(client, buffer)` calls Vision's
+  `annotateImage` with `LABEL_DETECTION` + `SAFE_SEARCH_DETECTION` in one
+  request (one Vision cost for both dish detection and moderation, per
+  `06-toolchain-decisions.md`). Takes the client as a parameter (same
+  dependency-injection pattern as `session-store.ts`'s `redis` and
+  `image-normalize.ts`'s buffer-in/buffer-out shape) so it's unit-testable
+  against a hand-built fake client, no network or real credentials needed
+  for tests. `src/vision/client.ts` holds the actual singleton
+  (`ImageAnnotatorClient` constructed from `GOOGLE_CLOUD_CREDENTIALS_JSON` /
+  `GOOGLE_CLOUD_PROJECT_ID`), imported only by the route.
+- `src/moderation/index.ts` — `checkModeration(safeSearch)`, a pure function
+  reading the SafeSearch annotation from the same Vision call. Blocks on
+  `LIKELY`/`VERY_LIKELY` for adult/violence/racy; deliberately allows
+  `POSSIBLE` through (fires on plenty of ordinary food photos, e.g. racy on
+  a photo of ribs) and never blocks on medical/spoof likelihoods, which
+  aren't moderation concerns for a dish photo.
+- `src/edge-cases/index.ts` — `classifyDish(labels, thresholds)`, the
+  Milestone #4–#7 heuristic. Vision has no built-in "is this one prepared
+  dish" signal, so this composes three label categories: generic
+  category labels ("Food", "Dish", "Cuisine" — prove food-relatedness but
+  can't name a dish), raw-ingredient labels ("Egg", "Carrot" — food-related
+  but not a *finished* dish, so milestone #6 puts these under "non-dish"
+  rather than "unidentified dish"), and everything else (candidate dish
+  names). Zero food-related labels at all → `non-dish`; food evidence but
+  no specific label clears `DISH_CONFIDENCE_THRESHOLD` → `low-confidence`;
+  more than one specific candidate clears it → `multi-dish`; exactly one →
+  accepted with `dishName`/`confidence`. New config:
+  `DISH_CONFIDENCE_THRESHOLD` (default `0.6`), `FOOD_EVIDENCE_THRESHOLD`
+  (default `0.5`).
+- `src/routes/upload.ts` now runs Vision analysis after `assessUpload`
+  passes (so blur/format/size rejections still never incur Vision cost):
+  moderation check first, then dish classification, each mapping to a
+  distinct `422` with a non-leaky message (`01-security-checklist.md` §6 —
+  no confidence scores or label names echoed to the client). A validated,
+  classified dish now gets `200 { status: "accepted", dishName, ... }`
+  instead of the old unconditional acceptance stub.
+
+**Prerequisite fixes hit along the way (both pre-existing, not caused by
+this cycle):**
+
+1. `packages/shared-auth`'s `@types/express` devDependency was in
+   `package.json` but not actually linked in `node_modules` (stale
+   lockfile-vs-install state) — `pnpm -r run build` failed on
+   `Cannot find module 'express'` before any of this cycle's code ran.
+   Fixed with a plain `pnpm install` (lockfile itself was already correct).
+   `packages/shared-db`'s `dist/` was similarly stale (missing the
+   `index.js` Cycle 8 added to `src/`) — fixed by rebuilding.
+2. The local `apps/dish-lens/.env` had a wrong relative path for
+   `GOOGLE_CLOUD_CREDENTIALS_JSON` (one `../` short — resolves from the
+   app's own cwd, not the repo root) and was missing `MAX_IMAGE_DIMENSION_PX`
+   / `UPLOAD_RATE_LIMIT_WINDOW_MS` / `UPLOAD_RATE_LIMIT_MAX_UPLOADS`, all
+   added to the config schema in Cycles 5 and 10 after this `.env` was last
+   hand-edited — the app couldn't have booted with it as found. Fixed
+   locally (`.env` isn't committed).
+3. `handleUploadError` (the route's catch-all error middleware) swallowed
+   unexpected errors with no server-side logging at all — a real gap once
+   this cycle introduced a new failure surface (Vision auth/quota/network
+   errors) that needs *some* visibility without leaking internals to the
+   client. Added a `console.error` server-side log ahead of the existing
+   generic `500` response — partial progress on `01-security-checklist.md`
+   §11's "log security-relevant events," not full structured logging (still
+   open, needs `shared-logger` wired in).
+
+**Tests:** 22 new cases, all against mocked Vision clients / hand-built
+label arrays — no live network in the test suite itself.
+`tests/vision/analyze-image.test.ts` (3): label/SafeSearch mapping, both
+feature types requested in one call, defaults to empty/`UNKNOWN` when Vision
+returns nothing. `tests/moderation/check-moderation.test.ts` (9): clean
+image passes, `POSSIBLE` passes, `LIKELY`/`VERY_LIKELY` block on each of
+adult/violence/racy individually, medical/spoof never block. `tests/edge-
+cases/classify-dish.test.ts` (10): single clear dish accepted, two distinct
+dishes → multi-dish, egg/carrot → non-dish (not low-confidence), empty
+plate/person/unrelated-object → non-dish, generic-evidence-only and
+just-under-threshold specific label → low-confidence, dish with only
+generic-labeled garnish/side → still accepted (single specific candidate).
+75/75 tests passing across the app (53 pre-existing + 22 new — one
+pre-existing file, `save-chat.test.ts`, fails/skips without a running local
+Postgres, unrelated to this cycle and unchanged by it). `pnpm -r run
+typecheck` and `pnpm -r run build` pass clean across all 9 workspace
+packages.
+
+**Verified live** (real Google Cloud project, real Vision API — first
+cycle able to do this): hit a real blocker mid-verification — the initial
+live call returned a genuine gRPC `PERMISSION_DENIED`, "Cloud Vision API has
+not been used in project ... or it is disabled," meaning the service
+account credentials authenticated correctly but the API itself wasn't
+enabled on the project. Flagged to the user rather than working around it
+(enabling a GCP API is an account-level action outside what this session
+should do unilaterally); the user enabled it directly in the GCP console.
+After that: started the real compiled app with the real `.env`, signed a
+real JWT with `jsonwebtoken` against the app's actual `JWT_ACCESS_SECRET`,
+and drove `POST /upload` with curl. A flat-color synthetic image was
+rejected `422 too-blurry` by the pre-existing blur check *before* Vision was
+ever reached (confirms cost-ordering still holds with the new stage added
+after it). A high-frequency synthetic checkerboard (passes the blur check,
+but isn't a real dish photo) reached a genuine Vision API call and came back
+`422 non-dish` — proving the full pipeline (auth → rate-limit → format/size/
+dimension/blur → real Vision call → moderation → classification) executes
+end-to-end against live infrastructure. Also confirmed: no `Authorization`
+header and a garbage token both still return the identical `401` *before*
+Vision runs (no wasted API cost on unauthenticated requests); the earlier
+mid-cycle `500` (before the credentials-path fix and the disabled-API
+error) came back as the same generic, non-leaking JSON body, with the real
+gRPC error text now visible server-side in the new log line instead of
+silently disappearing. All temporary processes, signed tokens, and
+generated test images were cleaned up afterward.
+
+**Not done yet:** no real dish-photo fixtures exist (still the standing gap
+noted since Cycle 3 for blur calibration, now also true for classification
+calibration) — the live check above proves the *pipeline* works against
+real Vision, not that the label-category heuristic in `classifyDish` is
+correctly calibrated against real dish photos, real multi-dish plates, or
+real poor-lighting shots. That remains a heuristic verified only against
+mocked label sets modeled on Vision's documented behavior, exactly as
+flagged inline in `edge-cases/index.ts`. Recipe generation (Anthropic,
+Milestone #8) and nutrition lookup (Edamam, Milestone #9) are unblocked by
+the same credential landing but not started this cycle. No session
+creation on a successful classification yet — `createSessionStore` (Cycle
+7) still has no caller. Object storage / pre-signed GCS URLs (Milestone #1
+leftover) still not done.

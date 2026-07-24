@@ -55,11 +55,11 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 6. DishLens-Specific — Edge Case Enforcement
 
-- [ ] Multi-dish photos are rejected with a clear, distinct error — never silently pick one dish
-- [ ] Blurred/pixelated photos are rejected by the local blur check *before* Vision is invoked (verify via logs/mocks that Vision wasn't called)
-- [ ] Non-dish items (raw ingredients, empty plates, unrelated objects) are rejected, not misidentified
-- [ ] Each rejection path returns a distinct, non-leaky error message (no internal confidence scores or model details exposed to the client)
-- [ ] Borderline cases (dish + garnish/side, ambiguous plating) have explicitly defined expected behavior, not undefined/inconsistent behavior
+- [x] Multi-dish photos are rejected with a clear, distinct error — never silently pick one dish. `classifyDish()` rejects `multi-dish` when more than one specific candidate label clears the confidence threshold; unit-tested (`07-implementation-log.md` Cycle 11) — not yet verified against a real multi-dish photo fixture.
+- [x] Blurred/pixelated photos are rejected by the local blur check *before* Vision is invoked (verify via logs/mocks that Vision wasn't called). Confirmed live in Cycle 5 and reconfirmed in Cycle 11 with the Vision stage now added after it — a flat-color synthetic image still gets `422 too-blurry` without ever reaching the Vision call.
+- [x] Non-dish items (raw ingredients, empty plates, unrelated objects) are rejected, not misidentified. `classifyDish()` treats raw-ingredient labels (egg, carrot, ...) and zero-food-evidence labels (plate, person, unrelated objects) both as `non-dish`; unit-tested (`07-implementation-log.md` Cycle 11).
+- [x] Each rejection path returns a distinct, non-leaky error message (no internal confidence scores or model details exposed to the client). `POST /upload`'s `DISH_REJECTION_RESPONSES`/moderation responses return fixed messages per reason code, never echoing label names or Vision scores (`07-implementation-log.md` Cycle 11).
+- [ ] Borderline cases (dish + garnish/side, ambiguous plating) have explicitly defined expected behavior, not undefined/inconsistent behavior. "Dish + garnish" is covered (a garnish typically surfaces only as a generic/category label, so the single specific dish label still wins) and unit-tested, but genuinely ambiguous plating (two visually-similar dishes) is untested against real photos — heuristic only, no real fixture set exists yet.
 
 ## 7. Session & Chat History (Redis + Postgres)
 
@@ -73,7 +73,7 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 - [x] Rate-limit API requests per IP/user/API key (`express-rate-limit` + `rate-limit-redis`, live on both apps — see `07-implementation-log.md` Cycle 2)
 - [ ] Rate-limit image uploads per user (count and bandwidth) — iOS clients may retry aggressively on poor cellular connections, so limits need to tolerate legitimate retries without allowing abuse. Count-based limiting live on `POST /upload`, Redis-backed, keyed on verified `userId` (not IP), verified live including cross-user isolation (`07-implementation-log.md` Cycle 10). Bandwidth-based limiting not done.
-- [ ] Run uploaded images through a moderation pipeline (NSFW/inappropriate content detection) before processing — reuses the Google Vision SafeSearch annotation, no separate provider (see `06-toolchain-decisions.md`)
+- [x] Run uploaded images through a moderation pipeline (NSFW/inappropriate content detection) before processing — reuses the Google Vision SafeSearch annotation, no separate provider (see `06-toolchain-decisions.md`). `checkModeration()` implemented, unit-tested, and wired live ahead of dish classification on `POST /upload` (`07-implementation-log.md` Cycle 11).
 - [ ] Provide report/block/delete mechanisms for saved chats and images
 
 ## 9. Secrets & Configuration
@@ -90,10 +90,10 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 11. Error Handling & Logging
 
-- [ ] Never leak stack traces, Prisma errors, or internal paths in responses
-- [ ] Centralize error-handling middleware across both apps (shared package)
-- [ ] Log security-relevant events (failed logins, permission denials, rejected uploads, rate-limit hits)
-- [ ] Never log raw image bytes, full chat content, or tokens — log references/IDs instead
+- [x] Never leak stack traces, Prisma errors, or internal paths in responses. True for every live DishLens route (`/upload`, `/chats`) — each has a catch-all error middleware returning a fixed generic `500` JSON body; verified live in Cycle 11 that a real Vision gRPC error (`PERMISSION_DENIED` with internal project/API details) surfaces only server-side, never in the client response. Not yet applicable to `drive-sync` (no live routes exist there yet).
+- [ ] Centralize error-handling middleware across both apps (shared package) — currently duplicated inline per-route (`routes/upload.ts`, `routes/history.ts`), not lifted into a shared package.
+- [ ] Log security-relevant events (failed logins, permission denials, rejected uploads, rate-limit hits). Partial: unexpected/unhandled errors are now logged server-side (`console.error`, Cycle 11), but *expected* rejections (401s, 422s, 429s) still only produce a response, no log line — needs real structured logging via `shared-logger` (still a stub), not just console.error on the unexpected-error path.
+- [ ] Never log raw image bytes, full chat content, or tokens — log references/IDs instead. No logging of these exists yet either way (nothing to violate this on), so this stays open pending the item above.
 
 ## 12. Infrastructure & Monitoring
 

@@ -33,6 +33,9 @@ const schema = z.object({
   MAX_IMAGE_DIMENSION_PX: z.coerce.number(),
   BLUR_VARIANCE_THRESHOLD: z.coerce.number(),
 
+  DISH_CONFIDENCE_THRESHOLD: z.coerce.number().default(0.6),
+  FOOD_EVIDENCE_THRESHOLD: z.coerce.number().default(0.5),
+
   RATE_LIMIT_WINDOW_MS: z.coerce.number(),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number(),
 

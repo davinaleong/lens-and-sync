@@ -45,13 +45,16 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 - [x] Session store: create/read/expire session state correctly (TTL behavior), including cross-user scoping and sliding-TTL-on-activity, verified against real Redis (`07-implementation-log.md` Cycle 7)
 - [x] Save-chat: session data correctly snapshotted into immutable Postgres record, owner-scoped listing/view, verified against real Postgres (`07-implementation-log.md` Cycle 8). Snapshots from a `ChatMessage[]` directly, not yet from a live Redis session (no route wires the two together yet).
 - [x] JWT verification: valid token accepted and `userId` extracted correctly; missing/expired/wrong-secret/malformed(no-`sub`)/non-JWT tokens all rejected with the correct internal reason but an identical external `401` (`07-implementation-log.md` Cycle 9)
+- [x] Vision label mapping: `analyzeImage()` correctly maps mocked label/SafeSearch annotations, requests both feature types in one call, and defaults sanely when Vision returns nothing (`07-implementation-log.md` Cycle 11, mocked client - no live network in the test suite)
+- [x] Moderation: SafeSearch likelihood table (`LIKELY`/`VERY_LIKELY` blocks per category, `POSSIBLE` and medical/spoof never block) (`07-implementation-log.md` Cycle 11)
+- [x] Dish classification heuristic: single dish accepted, two distinct dishes → multi-dish, raw ingredients → non-dish, empty plate/person/unrelated object → non-dish, generic-evidence-only → low-confidence, dish-with-garnish → still accepted (`07-implementation-log.md` Cycle 11) — against hand-built label arrays, not real Vision output
 
 **Edge case tests (dedicated fixture images required)**
-- [ ] **Multi-dish photo** → correctly rejected with the right error message, not silently picking one dish
-- [ ] **Blurred/pixelated photo** → rejected by blur check *before* Vision is called (confirm via logs/mocks that Vision API wasn't hit)
-- [ ] **Non-dish item photo** (raw egg, carrot, empty plate, random object) → rejected, not misidentified as a dish
-- [ ] Borderline cases: dish with garnish/side (single dish, should pass), two similar items plated together (ambiguous — confirm expected behavior is defined)
-- [ ] Vision low-confidence-but-not-blurry (e.g. poor lighting, odd angle) → rejected via confidence threshold, distinct error message from the blur rejection
+- [x] **Multi-dish photo** → correctly rejected with the right error message, not silently picking one dish. Logic implemented and unit-tested against synthetic label sets (`07-implementation-log.md` Cycle 11); no real multi-dish photo fixture exists yet to confirm real-world Vision output triggers it correctly.
+- [x] **Blurred/pixelated photo** → rejected by blur check *before* Vision is called (confirm via logs/mocks that Vision API wasn't hit). Reconfirmed live in Cycle 11 with the real Vision call now present after the blur check - a flat synthetic image still short-circuits at `422 too-blurry`.
+- [x] **Non-dish item photo** (raw egg, carrot, empty plate, random object) → rejected, not misidentified as a dish. Unit-tested for all four cases against synthetic label sets (`07-implementation-log.md` Cycle 11); a synthetic (non-photographic) checkerboard image was also confirmed live against the real Vision API to return `non-dish`. Real photos of an actual egg/carrot/empty plate still untested.
+- [ ] Borderline cases: dish with garnish/side (single dish, should pass - unit-tested, Cycle 11), two similar items plated together (ambiguous — heuristic behavior is defined as `multi-dish`, but unconfirmed against a real photo of two similar dishes)
+- [x] Vision low-confidence-but-not-blurry (e.g. poor lighting, odd angle) → rejected via confidence threshold, distinct error message from the blur rejection. Unit-tested (`07-implementation-log.md` Cycle 11) against synthetic label sets with food-category evidence but no specific label clearing the threshold; no real poor-lighting photo fixture yet.
 
 **Integration tests**
 - [ ] End-to-end: valid dish photo → recipe + nutrition returned with correct structure
@@ -72,7 +75,7 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 
 **Abuse/rate-limit tests**
 - [ ] Per-user upload rate limit enforced correctly (test with rapid successive uploads)
-- [ ] Moderation pass catches inappropriate image content in a test set
+- [ ] Moderation pass catches inappropriate image content in a test set. `checkModeration()`'s likelihood-threshold logic is unit-tested (`07-implementation-log.md` Cycle 11), but there's no real inappropriate-image test set to confirm Vision's SafeSearch actually flags real content correctly end-to-end - deliberately not sourced in this project.
 
 ---
 

@@ -5,8 +5,12 @@ import { rateLimit } from "express-rate-limit";
 import multer from "multer";
 import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { config } from "../config.js";
+import { classifyDish, type DishClassification } from "../edge-cases/index.js";
+import { checkModeration } from "../moderation/index.js";
 import { redis } from "../session/redis-client.js";
 import { assessUpload, type UploadAssessment } from "../upload/index.js";
+import { visionClient } from "../vision/client.js";
+import { analyzeImage } from "../vision/index.js";
 
 export const uploadRouter: Router = Router();
 
@@ -52,6 +56,12 @@ const REJECTION_RESPONSES: Record<Exclude<UploadAssessment, { ok: true }>["reaso
   "too-blurry": { status: 422, message: "Uploaded image is too blurry to process. Please retake the photo." },
 };
 
+const DISH_REJECTION_RESPONSES: Record<Exclude<DishClassification, { ok: true }>["reason"], { status: number; message: string }> = {
+  "non-dish": { status: 422, message: "Uploaded image does not appear to contain a recognizable dish." },
+  "low-confidence": { status: 422, message: "Could not confidently identify a dish in this image. Please try a clearer photo." },
+  "multi-dish": { status: 422, message: "Multiple dishes were detected. Please upload a photo of a single dish." },
+};
+
 uploadRouter.post(
   "/",
   requireAuth(config.JWT_ACCESS_SECRET),
@@ -76,12 +86,36 @@ uploadRouter.post(
         return;
       }
 
-      // TODO: Vision dish detection + edge-case rejection, recipe/nutrition
-      // generation, Redis session creation - all need live credentials that
-      // don't exist yet. A validated image is acknowledged for now so the
-      // pipeline up to this point can be exercised end-to-end.
+      const analysis = await analyzeImage(visionClient, req.file.buffer);
+
+      const moderation = checkModeration(analysis.safeSearch);
+      if (!moderation.ok) {
+        res.status(422).json({
+          error: {
+            code: moderation.reason,
+            message: "Uploaded image was flagged by content moderation and cannot be processed.",
+          },
+        });
+        return;
+      }
+
+      const classification = classifyDish(analysis.labels, {
+        dishConfidenceThreshold: config.DISH_CONFIDENCE_THRESHOLD,
+        foodEvidenceThreshold: config.FOOD_EVIDENCE_THRESHOLD,
+      });
+
+      if (!classification.ok) {
+        const response = DISH_REJECTION_RESPONSES[classification.reason];
+        res.status(response.status).json({ error: { code: classification.reason, message: response.message } });
+        return;
+      }
+
+      // TODO: recipe generation, nutrition lookup, Redis session creation -
+      // still separate cycles. A confirmed dish is acknowledged for now so
+      // the pipeline up to this point can be exercised end-to-end.
       res.status(200).json({
         status: "accepted",
+        dishName: classification.dishName,
         mimeType: assessment.mimeType,
         sizeBytes: assessment.sizeBytes,
         width: assessment.width,
@@ -108,6 +142,9 @@ const handleUploadError: ErrorRequestHandler = (err, _req, res, next) => {
     return;
   }
 
+  // Log server-side only - never leak internals (stack trace, Vision/Prisma
+  // error text) into the client response (`01-security-checklist.md` §11).
+  console.error("Unhandled error in /upload:", err);
   res.status(500).json({ error: { code: "internal-error", message: "An unexpected error occurred." } });
 };
 
