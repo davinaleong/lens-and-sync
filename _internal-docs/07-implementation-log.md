@@ -709,3 +709,69 @@ gap). No automated check for recipe feasibility beyond the system prompt
 itself - `04-testing-checklist.md`'s "spot-check against a rubric" for
 exotic equipment/ingredients is inherently a manual/qualitative check, not
 something this cycle automated.
+
+---
+
+## 2026-07-24 — Cycle 13: DishLens nutrition lookup (Edamam)
+
+**What:** `src/nutrition/index.ts` implements `lookupNutrition(fetchFn,
+credentials, dishName, ingredients)` - Milestone #9, matched to the
+generated ingredient list from Cycle 12's `generateRecipe()`. Same
+dependency-injection shape as the last two cycles: takes Node's global
+`fetch` as a parameter (`FetchLike`) instead of importing it, so tests
+never touch the network.
+
+**Gotcha hit (only discovered live, not from any doc):** Edamam's
+Nutrition Analysis API is documented to return top-level aggregate fields
+(`calories`, `totalWeight`, `totalNutrients`) alongside the per-ingredient
+breakdown. This account's real responses omit all three entirely - a real
+call returns only `{ uri, yield, dietLabels, healthLabels, cautions,
+ingredients }`, confirmed by dumping `Object.keys()` on an actual live
+response. First implementation (schema expecting the top-level fields)
+built, unit-tested against a shape matching the *documented* response, then
+failed live with `no-nutrition-data` against the *real* response - caught
+before this cycle was called done, not after. Rewrote to aggregate
+client-side from `ingredients[].parsed[].nutrients` instead (summing
+`ENERC_KCAL`/`PROCNT`/`FAT`/`CHOCDF` and `weight` across every parsed match
+in every ingredient line), which the real response reliably does contain
+regardless of the missing aggregate fields. Tests were rewritten to match
+this real shape rather than the documented one.
+
+**Tests:** `tests/nutrition/lookup-nutrition.test.ts` - 6 cases against a
+hand-built fake `fetch`: correct summation across multiple ingredients;
+dish title/ingredient list sent through to the request body; an ingredient
+with an empty `parsed` array (Edamam couldn't match it) contributes zero
+rather than breaking the sum; a non-2xx response rejects as
+`lookup-failed`; a 200 response where every ingredient is unmatched (zero
+total calories) rejects as `no-nutrition-data`; a response that doesn't
+match the expected shape at all also rejects as `no-nutrition-data`.
+70/70 tests passing across the app (64 after Cycle 12 + 6 here - one
+pre-existing file, `save-chat.test.ts`, still needs a running local
+Postgres, unchanged from every prior cycle). `pnpm -r run typecheck` and
+`pnpm -r run build` pass clean across all 9 workspace packages.
+
+**Verified live** (real Edamam API): a real call for "Margherita Pizza"
+with five realistic ingredient strings (matching Cycle 12's actual live
+recipe output) returned `{ calories: 2174.8, totalWeightGrams: 834.4,
+proteinGrams: 94.2, fatGrams: 95.6, carbsGrams: 232.8 }` - plausible for an
+8-serving pizza (~272 kcal/serving). Also drove two failure paths live, not
+just mocked: deliberately wrong credentials → real `401` → `lookup-failed`;
+a single gibberish ingredient string ("asdkfjaslkdjf gibberish xyz123") →
+Edamam's own real `555 { error: "low_quality" }` response → also
+`lookup-failed` (confirmed this is genuine Edamam behavior for unparseable
+input, not a bug in this code, by inspecting the raw status/body directly).
+Also confirmed these are NOT Food Database API credentials - a direct call
+to that different Edamam product's endpoint with the same `app_id`/
+`app_key` returned `401`, ruling out a wrong-endpoint explanation for the
+missing aggregate fields before concluding it's an account-tier quirk of
+the Nutrition Analysis product specifically.
+
+**Deliberately not wired into a route yet:** same reasoning as Cycle 12 -
+Milestone #11's "Response assembly" wants recipe generation, nutrition
+lookup, and Redis session creation combined into one coherent response in
+a single pass, not three separate partial wirings of the same route.
+
+**Not done yet:** Milestone #11 (response assembly: recipe + nutrition +
+session, wired into `POST /upload`) and Milestone #10's remaining gap
+(session creation actually called) are next. No caching/dedup of repeated
+Edamam lookups for the same dish - each request re-hits the live API.
