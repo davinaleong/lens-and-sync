@@ -1668,3 +1668,85 @@ since there's still no reader/writer for the `DriveFile` Prisma model to
 supply the "known" content hash or to know which files were actually
 deleted in a real sync run. That's the next cycle. Scheduling (#9) and
 the retrieval endpoint (#10) remain unstarted.
+
+---
+
+## 2026-07-29 — Cycle 24: DriveSync Postgres sync-state persistence
+
+**What:** New `src/sync-state/index.ts` - Milestone #8. No folder for this
+existed in the original scaffold (`03-monorepo-structure.md` lists `auth/`,
+`drive/`, `extraction/`, `chunking/`, `embeddings/`, `vector-store/`,
+`retrieval/`, `jobs/`, `routes/` - nothing Postgres-facing), so this is a
+small, deliberate addition, same as Cycle 22 adding `vector-store/index.ts`
+alongside the pre-scaffolded `pinecone-client.ts`. Four functions against
+the existing `DriveFile` Prisma model:
+
+- `listKnownFiles()` - reads every `DriveFile` row, mapped down to exactly
+  the `KnownFileRecord` shape `detectChanges()` (Cycle 18) already
+  expects. Reads every row rather than scoping by folder - the schema has
+  no `folderId` column (Milestone #8's own field list is `driveFileId`/
+  `contentHash`/`driveModifiedTime`/`chunkIds`/`lastSyncedAt` only), which
+  matches `detectChanges`'s existing behavior of following a file by ID
+  even if it moved between tracked folders.
+- `getKnownContentHash(driveFileId)` - the previously-recorded hash, or
+  `null` - the exact input shape `shouldReembedFile()` (Cycle 23) expects
+  for "never synced before."
+- `upsertSyncState(record)` - creates or updates a file's row. Only
+  bumps `lastSyncedAt` explicitly on the update branch; a freshly created
+  row relies on the schema's own `@default(now())` instead of duplicating
+  it.
+- `deleteSyncState(driveFileId)` - removes a file's row once its Pinecone
+  vectors are gone (Cycle 23's `deleteVectorsForFile`); a no-op rather
+  than an error if the row doesn't exist, so retrying a partially-failed
+  sync doesn't need a pre-check.
+
+Follows the established convention for Prisma-backed modules in this
+codebase (`dish-lens`'s `history/save-chat.ts`, `history/list-chats.ts`):
+imports the `prisma` singleton directly rather than taking it as a
+dependency-injection parameter, and tests run against a real local
+Postgres rather than a mock - Prisma itself isn't the kind of external
+dependency this codebase fakes.
+
+**Tests:** `tests/sync-state/sync-state.test.ts` - 8 cases against a real
+local Postgres (same migrated `lens_and_sync_dev` database dish-lens
+already uses): a new record is created and readable via `listKnownFiles`;
+its content hash is readable via `getKnownContentHash`; a
+never-synced file returns `null`; a second `upsertSyncState` call updates
+the existing row in place rather than creating a duplicate; `lastSyncedAt`
+is confirmed to advance on update; `chunkIds` round-trips as a real array;
+`deleteSyncState` removes a record so it disappears from `listKnownFiles`;
+deleting a file that was never synced resolves without throwing. Every
+test cleans up its own rows in `afterEach`. 67/67 tests passing across the
+app (59 pre-existing + 8 here). `pnpm -r run typecheck` and `pnpm -r run
+build` pass clean across all 9 workspace packages. Running dish-lens's own
+suite against the same shared Postgres confirmed no cross-app interference
+(72/72, unchanged) - caught along the way that the local Redis instance
+this session had been reusing had stopped running at some point; unrelated
+to this cycle's work, restarted to confirm it was purely an environment
+gap and not a regression, then torn back down afterward per this session's
+own teardown convention.
+
+**Verified live end-to-end** (real Drive, real Postgres - no mocks): with
+`listKnownFiles()` confirmed empty beforehand, ran `detectChanges` against
+the real 7-file Drive folder and the real (empty) Postgres state - all 7
+correctly classified `new`. Extracted and hashed each real file for real
+and called `upsertSyncState` for real, persisting all 7 to the actual
+`DriveFile` table. Re-ran `detectChanges` against the *same real Postgres
+state*, now populated - correctly found 0 new/updated/deleted, proving
+`listKnownFiles` → `detectChanges` round-trips real persisted state
+correctly, not just hand-built fixtures. Re-extracted and re-hashed every
+real file a second time and confirmed `shouldReembedFile` said "no" for
+all 7 against their real stored hashes - the full "would a real second
+sync run skip everything unchanged" question, answered yes with real
+infrastructure. All 7 rows were deleted afterward via `deleteSyncState`,
+confirmed `listKnownFiles()` back to empty - no leftover test data in the
+shared database. Postgres and Redis (both started fresh for this cycle,
+neither was running beforehand) were stopped afterward.
+
+**Not done yet:** nothing yet actually orchestrates
+`detectChanges` → `extractText` → `chunkText` → `generateEmbeddings` →
+`upsertChunkVectors`/`deleteVectorsForFile` → `upsertSyncState`/
+`deleteSyncState` into one real sync run triggered by anything other than
+a manual verification script - that orchestration, plus BullMQ scheduling
+and job locking, is Milestone #9, still unstarted. The retrieval endpoint
+(#10) also remains unstarted.
