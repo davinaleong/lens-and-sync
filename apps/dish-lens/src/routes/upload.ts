@@ -1,4 +1,5 @@
 import { requireAuth, type AuthenticatedRequest } from "@lens-and-sync/shared-auth";
+import { logSecurityEvent } from "@lens-and-sync/shared-logger";
 import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
@@ -6,6 +7,7 @@ import multer from "multer";
 import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { config } from "../config.js";
 import { classifyDish, type DishClassification } from "../edge-cases/index.js";
+import { logger } from "../logger.js";
 import { checkModeration } from "../moderation/index.js";
 import { lookupNutrition } from "../nutrition/index.js";
 import { normalizeImage } from "../preprocessing/image-normalize.js";
@@ -18,6 +20,8 @@ import { uploadsBucket } from "../storage/gcs-client.js";
 import { assessUpload, type UploadAssessment } from "../upload/index.js";
 import { visionClient } from "../vision/client.js";
 import { analyzeImage } from "../vision/index.js";
+
+const ROUTE = "POST /upload";
 
 const sessionStore = createSessionStore(redis, config.REDIS_SESSION_TTL_SECONDS);
 
@@ -42,7 +46,8 @@ const uploadRateLimiter = rateLimit({
   // Match this route's own JSON error shape instead of express-rate-limit's
   // default plain-text body - one consistent error schema across every
   // rejection path on this route (`02-milestones-checklist.md` #11).
-  handler: (_req, res) => {
+  handler: (req: AuthenticatedRequest, res) => {
+    logSecurityEvent(logger, { type: "rate-limited", route: ROUTE, reason: "upload-rate-limit-exceeded", statusCode: 429, userId: req.userId });
     res.status(429).json({
       error: { code: "rate-limited", message: "Too many uploads. Please wait before trying again." },
     });
@@ -73,7 +78,7 @@ const DISH_REJECTION_RESPONSES: Record<Exclude<DishClassification, { ok: true }>
 
 uploadRouter.post(
   "/",
-  requireAuth(config.JWT_ACCESS_SECRET),
+  requireAuth(config.JWT_ACCESS_SECRET, logger),
   uploadRateLimiter,
   upload.single("image"),
   async (req: AuthenticatedRequest, res, next) => {
@@ -91,6 +96,7 @@ uploadRouter.post(
 
       if (!assessment.ok) {
         const response = REJECTION_RESPONSES[assessment.reason];
+        logSecurityEvent(logger, { type: "upload-rejected", route: ROUTE, reason: assessment.reason, statusCode: response.status, userId: req.userId });
         res.status(response.status).json({ error: { code: assessment.reason, message: response.message } });
         return;
       }
@@ -99,6 +105,7 @@ uploadRouter.post(
 
       const moderation = checkModeration(analysis.safeSearch);
       if (!moderation.ok) {
+        logSecurityEvent(logger, { type: "moderation-blocked", route: ROUTE, reason: moderation.reason, statusCode: 422, userId: req.userId });
         res.status(422).json({
           error: {
             code: moderation.reason,
@@ -115,6 +122,7 @@ uploadRouter.post(
 
       if (!classification.ok) {
         const response = DISH_REJECTION_RESPONSES[classification.reason];
+        logSecurityEvent(logger, { type: "upload-rejected", route: ROUTE, reason: classification.reason, statusCode: response.status, userId: req.userId });
         res.status(response.status).json({ error: { code: classification.reason, message: response.message } });
         return;
       }
@@ -134,10 +142,10 @@ uploadRouter.post(
           const url = await getSignedReadUrl(uploadsBucket, stored.objectKey, config.GCS_SIGNED_URL_EXPIRY_SECONDS);
           image = { objectKey: stored.objectKey, url };
         } catch (err) {
-          console.error(`Image storage failed for a classified "${classification.dishName}" photo - continuing without a stored image.`, err);
+          logger.error({ err, dishName: classification.dishName }, "Image storage failed - continuing without a stored image.");
         }
       } else {
-        console.error(`Image normalization failed (${normalized.reason}) for a classified "${classification.dishName}" photo - continuing without a stored image.`);
+        logger.error({ reason: normalized.reason, dishName: classification.dishName }, "Image normalization failed - continuing without a stored image.");
       }
 
       const recipeResult = await generateRecipe(anthropicClient, config.ANTHROPIC_MODEL, classification.dishName);
@@ -163,7 +171,7 @@ uploadRouter.post(
         recipe.ingredients,
       );
       if (!nutritionResult.ok) {
-        console.error(`Nutrition lookup failed (${nutritionResult.reason}) for dish "${recipe.dishName}" - continuing without nutrition data.`);
+        logger.error({ reason: nutritionResult.reason, dishName: recipe.dishName }, "Nutrition lookup failed - continuing without nutrition data.");
       }
       const nutrition = nutritionResult.ok ? nutritionResult.nutrition : null;
 
@@ -206,6 +214,7 @@ const handleUploadError: ErrorRequestHandler = (err, _req, res, next) => {
 
   if (err instanceof multer.MulterError) {
     if (err.code === "LIMIT_FILE_SIZE") {
+      logSecurityEvent(logger, { type: "upload-rejected", route: ROUTE, reason: "too-large", statusCode: 413, userId: (_req as AuthenticatedRequest).userId });
       res.status(413).json({ error: { code: "too-large", message: "Uploaded file exceeds the maximum allowed size." } });
       return;
     }
@@ -215,7 +224,7 @@ const handleUploadError: ErrorRequestHandler = (err, _req, res, next) => {
 
   // Log server-side only - never leak internals (stack trace, Vision/Prisma
   // error text) into the client response (`01-security-checklist.md` §11).
-  console.error("Unhandled error in /upload:", err);
+  logger.error({ err }, "Unhandled error in /upload");
   res.status(500).json({ error: { code: "internal-error", message: "An unexpected error occurred." } });
 };
 

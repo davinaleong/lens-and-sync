@@ -4,6 +4,7 @@ import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { config } from "./config.js";
+import { logger } from "./logger.js";
 import { historyRouter } from "./routes/history.js";
 import { uploadRouter } from "./routes/upload.js";
 import { redis } from "./session/redis-client.js";
@@ -35,5 +36,5 @@ app.use("/upload", uploadRouter);
 app.use("/chats", historyRouter);
 
 app.listen(config.PORT, () => {
-  console.log(`dish-lens listening on :${config.PORT}`);
+  logger.info({ port: config.PORT }, "dish-lens listening");
 });

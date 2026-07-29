@@ -925,3 +925,108 @@ sweep). No `imageObjectKey` column on `SavedChat` - if a session is later
 saved (Cycle 8's `saveChat`, still unwired to this flow), the image
 reference only lives inside the JSONB message content, not as a queryable
 field.
+
+---
+
+## 2026-07-29 — Cycle 16: structured logging (`shared-logger`) + security-event logging
+
+**What:** `packages/shared-logger/src/index.ts` now exports a real
+`createLogger({ service, level })` (a configured `pino` instance - JSON
+lines, ISO timestamps, service name tag) instead of the empty `TODO` stub,
+closing the last blocker noted in `01-security-checklist.md` §11
+("needs real structured logging via `shared-logger`, not just
+`console.error` on the unexpected-error path"). Two things beyond a bare
+pino wrapper:
+
+- **Redaction.** A fixed `redact` path list (`headers.authorization`,
+  `token`/`accessToken`/`refreshToken`, `password`, `buffer`/`imageBuffer`,
+  `content`, `messages`, each also matched one level deep via pino's `*`
+  wildcard) censors these fields to `"[REDACTED]"` wherever they appear in
+  a logged object, regardless of call site - directly implements
+  `01-security-checklist.md` §11's "never log raw image bytes, full chat
+  content, or tokens."
+- **`logSecurityEvent(logger, event)`** - one consistent shape
+  (`event`/`route`/`reason`/`statusCode`/`userId`, logged at `warn`) for
+  every *expected* rejection (401/413/415/422/429), so these are
+  greppable/alertable as a single class rather than scattered ad hoc
+  `console.error` calls - the other half of §11 ("log security-relevant
+  events... failed logins, permission denials, rejected uploads,
+  rate-limit hits"), which before this cycle only covered *unexpected*
+  errors (Cycle 11's `console.error` addition).
+
+`packages/shared-auth/src/middleware.ts`'s `requireAuth` now takes an
+optional second `logger` parameter (a minimal structural
+`AuthEventLogger` interface - just `warn(obj, msg?)` - rather than an
+import from `shared-logger`, so `shared-auth` doesn't gain a hard
+dependency on the logging package; `shared-logger`'s real `Logger`
+satisfies it structurally). On rejection, it now logs the *internal*
+reason (missing/malformed/expired/invalid) server-side via
+`logSecurityEvent`-shaped fields before returning the same external `401`
+as always - the client-visible contract from Cycle 9 is unchanged, only
+what's now visible server-side. Logs `req.originalUrl`, not `req.path` -
+caught live (see below) that `req.path` inside a mounted sub-router
+strips the mount prefix, which would've logged every rejection as the
+unhelpful `"POST /"` regardless of which route it came from.
+
+Both `dish-lens` routes now use the real logger: `routes/upload.ts` logs
+`upload-rejected` (format/size/dimension/blur/dish-classification
+rejections), `moderation-blocked`, and `rate-limited` (the per-user upload
+limiter's handler); `routes/history.ts` gained server-side error logging
+it never had before (a real, if smaller, pre-existing gap - the same
+"first cycle to actually touch this code" pattern as Cycle 8's `shared-db`
+fixes). Every prior `console.error` call (unhandled-error catch-alls in
+both routes, nutrition-lookup failure, and this repo's own new
+image-storage/normalization failure logging from Cycle 15) is now
+`logger.error` with a real `err` field - `createLogger` registers pino's
+standard `err` serializer so a logged `Error` produces an actual
+`message`/`stack`, not an empty object (plain JSON.stringify of an `Error`
+loses its non-enumerable `message`/`stack` properties otherwise; caught by
+a dedicated unit test before assuming it worked).
+
+**Prerequisite fix:** `shared-logger` had no `test` script or `vitest`
+devDependency - added both, matching the convention `shared-auth`
+established in Cycle 9.
+
+**Tests:** `packages/shared-logger/tests/logger.test.ts` - 6 cases against
+a real pino instance writing to a captured in-memory stream (not mocked -
+this needs pino's actual redaction/serialization behavior to mean
+anything): logs at the configured level tagged with the service name;
+suppresses below-threshold levels; redacts an `authorization` header
+wherever nested, confirmed the raw token string never appears anywhere in
+the serialized line; serializes an `err: new Error(...)` into a real
+`message`/`stack` rather than `{}`; redacts `buffer`/`content` fields,
+confirmed the raw strings never appear in the output; `logSecurityEvent`
+produces the correct structured warning shape. `packages/shared-auth/tests/middleware.test.ts`
+gained 2 cases: a supplied logger receives the internal rejection reason on
+401 without changing the client response; the logger is never called on a
+successful verification. 78/78 dish-lens tests still passing (`save-chat.test.ts`'s
+4 cases still skip without a running local Postgres, unchanged), 18/18
+shared-auth + shared-logger tests passing. `pnpm -r run typecheck` and
+`pnpm -r run build` pass clean across all 9 workspace packages.
+
+**Verified live** (real running app, real `.env`, no mocks): started the
+compiled app and drove requests with curl while tailing the raw log
+output. An unauthenticated `POST /upload` and `GET /chats` each produced a
+`{"event":"auth-rejected","route":"POST /upload","reason":"missing",...}`-
+shaped JSON line - and this is where the `req.path` vs `req.originalUrl`
+bug was actually caught: the first version logged both as `"POST /"` /
+`"GET /"`, which would make route-based alerting useless in production
+(every rejection looking identical). Fixed, rebuilt, and re-verified: the
+routes now log correctly (`POST /upload`, `GET /chats`). A plain-text file
+renamed as an upload, sent with a valid signed JWT, produced an
+`{"event":"upload-rejected","reason":"unrecognized-format","userId":"verify-user-cycle16",...}`
+line - confirmed by inspecting the raw log line directly that no file
+content or header value appears anywhere in it. The app process was
+stopped afterward.
+
+**Not done yet:** `logger.info`-level request logging (a line per request,
+not just per-rejection) doesn't exist - only rejections and the boot line
+are logged today; that's a reasonable next increment but wasn't asked for
+by any checklist item, so left alone rather than expanding scope. Error
+middleware itself is still duplicated per-route (`handleUploadError`,
+`handleHistoryError`) rather than lifted into a shared package -
+`01-security-checklist.md` §11's separate "centralize error-handling
+middleware" item is still open. `drive-sync` has no logger wiring yet -
+its routes/index.ts are still stubs with nothing to log. No log
+shipping/aggregation (Sentry/Datadog, `01-security-checklist.md` §12) -
+these are structured local JSON lines only, not sent anywhere yet.

@@ -3,10 +3,11 @@ import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
 import { config } from "../config.js";
 import { getSavedChat, listSavedChats } from "../history/list-chats.js";
+import { logger } from "../logger.js";
 
 export const historyRouter: Router = Router();
 
-historyRouter.use(requireAuth(config.JWT_ACCESS_SECRET));
+historyRouter.use(requireAuth(config.JWT_ACCESS_SECRET, logger));
 
 historyRouter.get("/", async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -43,6 +44,10 @@ const handleHistoryError: ErrorRequestHandler = (err, _req, res, next) => {
     next(err);
     return;
   }
+  // Log server-side only - never leak internals (stack trace, Prisma error
+  // text) into the client response (`01-security-checklist.md` §11), same
+  // pattern as `routes/upload.ts`'s catch-all.
+  logger.error({ err }, "Unhandled error in /chats");
   res.status(500).json({ error: { code: "internal-error", message: "An unexpected error occurred." } });
 };
 

@@ -6,7 +6,11 @@ import { requireAuth, type AuthenticatedRequest } from "../src/middleware.js";
 const SECRET = "test-secret";
 
 function mockReqRes(authorizationHeader?: string) {
-  const req = { headers: { authorization: authorizationHeader } } as unknown as AuthenticatedRequest;
+  const req = {
+    headers: { authorization: authorizationHeader },
+    method: "POST",
+    originalUrl: "/upload",
+  } as unknown as AuthenticatedRequest;
   const json = vi.fn();
   const status = vi.fn().mockReturnValue({ json });
   const res = { status } as unknown as Response;
@@ -55,5 +59,30 @@ describe("requireAuth", () => {
 
     expect(status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it("logs the internal rejection reason server-side when a logger is supplied, without changing the client response", () => {
+    const { req, res, status, json, next } = mockReqRes(undefined);
+    const logger = { warn: vi.fn() };
+
+    requireAuth(SECRET, logger)(req, res, next);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "auth-rejected", reason: "missing", statusCode: 401, route: "POST /upload" }),
+      expect.any(String),
+    );
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith({ error: { code: "unauthorized", message: "Authentication required." } });
+  });
+
+  it("never calls the logger on successful verification", () => {
+    const token = jwt.sign({ sub: "user-123" }, SECRET, { expiresIn: "15m" });
+    const { req, res, next } = mockReqRes(`Bearer ${token}`);
+    const logger = { warn: vi.fn() };
+
+    requireAuth(SECRET, logger)(req, res, next);
+
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledOnce();
   });
 });
