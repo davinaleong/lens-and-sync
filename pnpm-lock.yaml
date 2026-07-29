@@ -247,10 +247,20 @@ importers:
         version: 5.9.3
 
   packages/shared-utils:
+    dependencies:
+      '@lens-and-sync/shared-logger':
+        specifier: workspace:*
+        version: link:../shared-logger
     devDependencies:
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.43)
 
 packages:
 

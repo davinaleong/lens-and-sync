@@ -1030,3 +1030,121 @@ middleware" item is still open. `drive-sync` has no logger wiring yet -
 its routes/index.ts are still stubs with nothing to log. No log
 shipping/aggregation (Sentry/Datadog, `01-security-checklist.md` §12) -
 these are structured local JSON lines only, not sent anywhere yet.
+
+---
+
+## 2026-07-29 — Cycle 17: input/transport hardening + centralized error handling
+
+**What:** Closes most of `01-security-checklist.md` §2/§3 and the
+"centralize error-handling middleware" item flagged as still-open at the
+end of Cycle 16. New `packages/shared-utils/src/http.ts` (the package's
+first real content past its `TODO` stub) exports three framework-level
+pieces shared by both apps:
+
+- **`enforceHttps(nodeEnv)`** - rejects any request reaching the app over
+  plain HTTP once `NODE_ENV=production`, a no-op in dev. Requires
+  `app.set("trust proxy", 1)` (now set in both apps' `index.ts`) so
+  `req.secure` reflects the client's real connection when a TLS-terminating
+  load balancer sits in front, not the plain-HTTP proxy-to-app hop.
+- **`notFoundHandler()`** - a JSON `404` instead of Express's default HTML
+  "Cannot GET /x" page.
+- **`createFallbackErrorHandler(logger)`** - the actual centralization:
+  one last-resort error handler, registered after every router in both
+  apps, replacing what was previously duplicated per-route
+  (`handleUploadError`, `handleHistoryError` still exist for their
+  route-specific cases like `multer.MulterError`, but anything that
+  reaches *this* handler - most importantly body-parser errors like
+  malformed JSON, which fire in global middleware before any router is
+  reached - is now caught centrally instead of falling through to
+  Express's own leaky default). Maps a body-parser-style 4xx error to its
+  real status (`400`, not a blanket `500`) without ever echoing the
+  parser's own error message (which could contain a snippet of the raw
+  malformed body).
+
+Both apps' `index.ts` also gained a custom `helmet` CSP
+(`default-src 'none'`, `useDefaults: false` - correct for a pure JSON API
+that never serves HTML/scripts/styles; `useDefaults: false` was added
+after a live check showed helmet otherwise merges in font-src/img-src/
+style-src defaults alongside `defaultSrc`, diluting the "nothing is
+allowed" intent) and an explicit `express.json({ limit: "100kb" })` body
+size cap. `drive-sync` also gained `src/logger.ts` (same `createLogger`
+pattern as Cycle 16's `dish-lens` one) since it's now wired into
+`createFallbackErrorHandler` and the boot-line log - the first real code
+in that app beyond scaffolding, though its own routes remain unbuilt
+(DriveSync milestones haven't started).
+
+Two DishLens-specific input-validation additions:
+- `routes/upload.ts` gained `requireMultipartContentType` - rejects any
+  `POST /upload` whose `Content-Type` doesn't start with
+  `multipart/form-data` with a `415`, *before* multer parses it. Distinct
+  from `validateUpload`'s magic-byte sniffing of the file itself - this is
+  the header-level check `01-security-checklist.md` §3 asks for
+  separately. Logged via `logSecurityEvent` like every other rejection on
+  this route.
+- `routes/history.ts`'s `GET /:chatId` now validates `chatId` against a
+  `zod` `.uuid()` schema (matching `SavedChat`'s Prisma `@default(uuid())`
+  ID) before calling `getSavedChat` - previously only checked truthiness,
+  which is nearly a no-op since Express won't match `:chatId` on an empty
+  path segment anyway. Malformed IDs now get a clean `400` instead of
+  being handed to Prisma unchecked.
+
+Also confirmed, not implemented: `01-security-checklist.md` §3's "use
+Prisma's parameterized queries - never raw string-concatenated SQL" is
+already satisfied - grepped the whole repo for `$queryRaw`/`$executeRaw`
+and found zero matches, so there's nothing to fix, just nothing to
+regress either. "Sanitize/escape user-supplied text (chat titles, etc.)
+before storage and on render" stays open - no live endpoint accepts
+free-text user input yet (`SavedChat.dishName` comes from Vision/Claude,
+not a client-supplied field), so there's nothing to sanitize against
+today.
+
+**Tests:** `packages/shared-utils/tests/http.test.ts` - 7 cases against
+hand-built mock `req`/`res`: `enforceHttps` passes plain HTTP through in
+dev, passes secure requests through in production, rejects plain HTTP in
+production with a `403`; `notFoundHandler` returns a JSON `404`;
+`createFallbackErrorHandler` logs and returns a generic `500`, maps a
+body-parser-style error object (`status: 400`) to its real status instead
+of a blanket `500`, and defers to `next()` rather than double-responding
+if headers were already sent. `packages/shared-utils` also gained its
+first `test`/`vitest` setup (same prerequisite pattern as Cycles 9 and
+16). 72/72 dish-lens tests passing - **all of them**, including
+`save-chat.test.ts`'s 4 cases, which had skipped in every prior cycle for
+lack of a running local Postgres; this cycle stood one up for live
+verification (see below) and applied the existing `prisma migrate deploy`
+against it, so the standing test gap is now closed for any future session
+that has Postgres running. `pnpm -r run typecheck` and `pnpm -r run build`
+pass clean across all 9 workspace packages.
+
+**Verified live** (real running app, real `.env`): started a local
+Postgres (via the Laragon-bundled `postgres.exe`/`pg_ctl` - not Docker,
+which isn't installed in this environment) against the existing
+`lens_and_sync_dev` database, found it had no schema at all (a different
+local Postgres instance than whatever prior cycles used), and applied
+`prisma migrate deploy` to bring it current - closing the recurring
+"needs a running local Postgres" gap for real, not just working around it.
+With the compiled app running: confirmed the CSP header is exactly
+`Content-Security-Policy: default-src 'none'` (the `useDefaults: false`
+fix, caught live - the first version leaked extra default directives);
+confirmed HSTS (`Strict-Transport-Security`) and `X-Content-Type-Options`
+headers are present; an unknown route returned the new JSON `404`; a
+malformed-JSON body to `GET /chats` returned a JSON `400`
+(`{"error":{"code":"invalid-request",...}}`), not an HTML stack-trace
+page; `POST /upload` with a valid token but `Content-Type: application/json`
+returned `415 invalid-content-type` before multer ran; `GET /chats/not-a-uuid`
+returned `400 invalid-request`; and - now that Postgres was actually
+migrated - `GET /chats` returned a real `{"chats":[]}` and
+`GET /chats/:chatId` for a well-formed but nonexistent UUID returned a
+genuine `404 not-found` (previously this could only be verified as a
+generic `500`, since no live Postgres was reachable in any earlier
+cycle's verification). The app process was stopped afterward; Postgres
+was also stopped (it wasn't running before this cycle, unlike the
+already-running local Redis, so it was torn down to match).
+
+**Not done yet:** RBAC/ABAC checks beyond "is this a valid token for some
+user" (`01-security-checklist.md` §1, unrelated to this cycle's scope).
+Query-param validation has no live target yet - no current endpoint reads
+a query string. Chat-title/free-text sanitization stays blocked on an
+endpoint that accepts free text existing at all (see above). `drive-sync`
+still has no real routes to apply `requireMultipartContentType`-style
+per-route validation to - only the app-level hardening (CSP, HTTPS
+enforcement, fallback error handler) applies there so far.

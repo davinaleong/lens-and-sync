@@ -1,6 +1,6 @@
 import { requireAuth, type AuthenticatedRequest } from "@lens-and-sync/shared-auth";
 import { logSecurityEvent } from "@lens-and-sync/shared-logger";
-import type { ErrorRequestHandler } from "express";
+import type { ErrorRequestHandler, NextFunction, Response } from "express";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import multer from "multer";
@@ -76,10 +76,29 @@ const DISH_REJECTION_RESPONSES: Record<Exclude<DishClassification, { ok: true }>
   "multi-dish": { status: 422, message: "Multiple dishes were detected. Please upload a photo of a single dish." },
 };
 
+/**
+ * Rejects anything that isn't a multipart request before multer parses
+ * it - a strict Content-Type check distinct from `validateUpload`'s
+ * magic-byte sniffing of the *file itself* (`01-security-checklist.md`
+ * §3's "validate Content-Type strictly; reject unexpected MIME types").
+ * Runs after auth/rate-limiting so an unauthenticated or rate-limited
+ * request is rejected first without this check needing to run at all.
+ */
+function requireMultipartContentType(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  const contentType = req.headers["content-type"];
+  if (!contentType?.startsWith("multipart/form-data")) {
+    logSecurityEvent(logger, { type: "upload-rejected", route: ROUTE, reason: "invalid-content-type", statusCode: 415, userId: req.userId });
+    res.status(415).json({ error: { code: "invalid-content-type", message: "Expected a multipart/form-data request." } });
+    return;
+  }
+  next();
+}
+
 uploadRouter.post(
   "/",
   requireAuth(config.JWT_ACCESS_SECRET, logger),
   uploadRateLimiter,
+  requireMultipartContentType,
   upload.single("image"),
   async (req: AuthenticatedRequest, res, next) => {
     try {

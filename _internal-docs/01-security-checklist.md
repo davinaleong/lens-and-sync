@@ -16,19 +16,19 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 2. Transport & Headers
 
-- [ ] Enforce HTTPS everywhere; enable HSTS
-- [x] Use `helmet` for security headers (CSP, X-Content-Type-Options, X-Frame-Options, etc.) — defaults only so far, no custom CSP yet (see `07-implementation-log.md` Cycle 2)
+- [x] Enforce HTTPS everywhere; enable HSTS. `enforceHttps()` (`packages/shared-utils`) rejects any request reaching either app over plain HTTP once `NODE_ENV=production`; HSTS is present via `helmet`'s default (`Strict-Transport-Security`, confirmed live). Real TLS termination still belongs at the load balancer — this is an app-level backstop (`07-implementation-log.md` Cycle 17).
+- [x] Use `helmet` for security headers (CSP, X-Content-Type-Options, X-Frame-Options, etc.) — custom CSP added (`default-src 'none'`, `useDefaults: false`), correct for a JSON API that never serves HTML/scripts. Verified live the header is exactly `default-src 'none'` with no leaked default directives (`07-implementation-log.md` Cycle 17, building on Cycle 2).
 - [x] Set `Access-Control-Allow-Origin` to an explicit allowlist, not `*` (see `07-implementation-log.md` Cycle 2)
 - [x] Disable framework fingerprinting (`app.disable('x-powered-by')`)
 
 ## 3. Input Handling
 
-- [ ] Validate/sanitize all input with a schema library (`zod`, `joi`, `yup`)
-- [ ] Validate body, query params, AND headers
-- [ ] Use Prisma's parameterized queries — never raw string-concatenated SQL, even via `$queryRaw`
-- [ ] Enforce request size limits appropriate to real iOS camera output (10–20MB+ HEIC files), not just small test fixtures
-- [ ] Validate `Content-Type` strictly; reject unexpected MIME types
-- [ ] Sanitize/escape any user-supplied text (chat titles, etc.) before storage and on render
+- [x] Validate/sanitize all input with a schema library (`zod`, `joi`, `yup`). `zod` used for `GET /chats/:chatId`'s `chatId` param (`.uuid()`) — the only live endpoint that takes user-suppliable identifying input beyond the (magic-byte-sniffed, not schema-validated-by-design) upload file itself (`07-implementation-log.md` Cycle 17).
+- [x] Validate body, query params, AND headers. Path params (`chatId`) validated via `zod`; headers (`Content-Type` on `POST /upload`, `Authorization` everywhere) validated explicitly. No endpoint takes query params or a JSON body yet, so there's nothing further to validate there today.
+- [x] Use Prisma's parameterized queries — never raw string-concatenated SQL, even via `$queryRaw`. Confirmed by grep: zero `$queryRaw`/`$executeRaw` usages anywhere in the repo (`07-implementation-log.md` Cycle 17) — every query goes through Prisma's generated client methods.
+- [x] Enforce request size limits appropriate to real iOS camera output (10–20MB+ HEIC files), not just small test fixtures. `MAX_UPLOAD_SIZE_MB` (multer, Cycle 5) covers the upload path; `express.json({ limit: "100kb" })` now explicit for the (currently unused) JSON-body path (`07-implementation-log.md` Cycle 17).
+- [x] Validate `Content-Type` strictly; reject unexpected MIME types. `requireMultipartContentType` on `POST /upload` rejects any non-`multipart/form-data` request with `415` before multer parses it; verified live (`07-implementation-log.md` Cycle 17). Distinct from `validateUpload`'s magic-byte sniffing of the file's actual bytes (Cycle 5).
+- [ ] Sanitize/escape any user-supplied text (chat titles, etc.) before storage and on render. Still blocked on an endpoint that accepts free-text user input existing at all — `SavedChat.dishName` is Vision/Claude-derived, never client-supplied (`07-implementation-log.md` Cycle 17).
 
 ## 4. DriveSync-Specific
 
@@ -91,7 +91,7 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 ## 11. Error Handling & Logging
 
 - [x] Never leak stack traces, Prisma errors, or internal paths in responses. True for every live DishLens route (`/upload`, `/chats`) — each has a catch-all error middleware returning a fixed generic `500` JSON body; verified live in Cycle 11 that a real Vision gRPC error (`PERMISSION_DENIED` with internal project/API details) surfaces only server-side, never in the client response. Not yet applicable to `drive-sync` (no live routes exist there yet).
-- [ ] Centralize error-handling middleware across both apps (shared package) — currently duplicated inline per-route (`routes/upload.ts`, `routes/history.ts`), not lifted into a shared package.
+- [x] Centralize error-handling middleware across both apps (shared package). `createFallbackErrorHandler`/`notFoundHandler` (`packages/shared-utils`) now registered app-wide, last, in both `dish-lens` and `drive-sync` — catches anything not handled by a route's own error middleware (most notably body-parser errors, which fire before routing even happens) and maps client-error status codes correctly instead of a blanket `500` (`07-implementation-log.md` Cycle 17). Route-specific error handling (`handleUploadError`'s `multer.MulterError` case, `handleHistoryError`) still exists per-route for cases the shared handler can't know about, by design.
 - [x] Log security-relevant events (failed logins, permission denials, rejected uploads, rate-limit hits). `shared-logger`'s `createLogger`/`logSecurityEvent` implemented (`07-implementation-log.md` Cycle 16) — `requireAuth` logs every 401 (internal reason, not just the generic external message), and `POST /upload` logs `upload-rejected`/`moderation-blocked`/`rate-limited` for every rejection path. Verified live: a real running app produced the expected structured JSON line for each case.
 - [x] Never log raw image bytes, full chat content, or tokens — log references/IDs instead. `createLogger`'s `redact` config censors `authorization`/`token`/`buffer`/`content`/`messages` fields wherever they appear in a logged object; unit-tested that the raw values never appear in the serialized output (`07-implementation-log.md` Cycle 16).
 

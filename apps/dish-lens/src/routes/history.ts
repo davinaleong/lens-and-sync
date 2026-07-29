@@ -1,9 +1,15 @@
 import { requireAuth, type AuthenticatedRequest } from "@lens-and-sync/shared-auth";
 import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
+import { z } from "zod";
 import { config } from "../config.js";
 import { getSavedChat, listSavedChats } from "../history/list-chats.js";
 import { logger } from "../logger.js";
+
+// SavedChat IDs are Prisma `@default(uuid())` - reject anything that isn't
+// a plausible UUID before it ever reaches Prisma (`01-security-checklist.md`
+// §3's "validate body, query params, AND headers", applied to path params).
+const chatIdSchema = z.string().uuid();
 
 export const historyRouter: Router = Router();
 
@@ -22,13 +28,13 @@ historyRouter.get("/", async (req: AuthenticatedRequest, res, next) => {
 
 historyRouter.get("/:chatId", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const chatId = req.params.chatId;
-    if (!chatId) {
-      res.status(400).json({ error: { code: "invalid-request", message: "A chat ID is required." } });
+    const parsedChatId = chatIdSchema.safeParse(req.params.chatId);
+    if (!parsedChatId.success) {
+      res.status(400).json({ error: { code: "invalid-request", message: "A valid chat ID is required." } });
       return;
     }
 
-    const chat = await getSavedChat(req.userId as string, chatId);
+    const chat = await getSavedChat(req.userId as string, parsedChatId.data);
     if (!chat) {
       res.status(404).json({ error: { code: "not-found", message: "Saved chat not found." } });
       return;
