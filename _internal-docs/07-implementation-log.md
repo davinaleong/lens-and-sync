@@ -1236,3 +1236,89 @@ pure comparison logic; nothing yet calls it with real `DriveFile` records
 from Postgres, since that model has no reader/writer in `drive-sync` at
 all today. No scheduling (#9) or retrieval endpoint (#10) - `routes/sync.ts`
 is still an empty stub.
+
+---
+
+## 2026-07-29 — Cycle 19: DriveSync extraction pipeline
+
+**What:** `src/extraction/index.ts` implements `extractText(drive, file)`
+- Milestone #3. Dispatches on `mimeType`:
+
+- **Google Docs / Slides** (`application/vnd.google-apps.document` /
+  `...presentation`) - Drive's own `files.export` to `text/plain`. No
+  separate parser needed; Drive does the conversion server-side.
+- **Google Sheets** (`application/vnd.google-apps.spreadsheet`) - exports
+  to `text/csv`. Documented limitation: Drive's `export` endpoint only
+  returns the *first* sheet of a multi-sheet spreadsheet - full
+  multi-sheet support would need the separate Sheets API (`spreadsheets.values.get`
+  per sheet), out of scope for this cycle.
+- **Plain text** (`text/plain`) - downloaded via `files.get({ alt: "media"
+  })` and decoded as UTF-8 as-is.
+- **PDF** (`application/pdf`) - downloaded the same way, then parsed with
+  `pdf-parse` v2 (a from-scratch TypeScript rewrite, not the old v1
+  function-style API - exposes a `PDFParse` class with `.getText()`).
+
+Every path returns a discriminated `ExtractionResult` rather than a bare
+string, with `empty-content` and `unsupported-mime-type` as distinct
+non-throwing outcomes (mirrors the discriminated-result pattern used
+throughout DishLens - `assessUpload`, `classifyDish`, etc.) - a caller can
+tell "nothing to extract" apart from "this file type isn't handled" apart
+from a genuine `extraction-failed`.
+
+**OCR for scanned PDFs (the milestone's conditional clause) is detected,
+not implemented.** A PDF with real pages but no extractable text (the
+signature of a scanned/image-only PDF) returns a distinct
+`scanned-pdf-ocr-not-implemented` reason rather than silently returning
+empty text or claiming success on a blank string. Real OCR (`tesseract.js`
+being the natural fit, since it's already a documented option and needs
+no separate paid API) is left as a dedicated follow-up - it needs a real
+scanned-PDF fixture to verify against (none exists in the test Drive
+folder, which is all native Google Docs), and its worker-based
+runtime downloads trained-language data at runtime, which needs its own
+verification pass rather than being bundled into this cycle.
+
+**Gotcha hit (caught by a test before assuming it worked):** `pdf-parse`'s
+`getText()` inserts a `"-- page_number of total_number --"` marker
+between every page by default (`pageJoiner` parameter). A real generated
+PDF with a page but zero text drawn on it therefore came back as `{ ok:
+true, text: "-- 1 of 1 --" }` - a `pageJoiner: ""` on every `getText()`
+call fixed it, letting the actual emptiness check work correctly.
+
+**Prerequisite additions:** `pdf-parse` (`^2.4.5`) added as a runtime
+dependency; `pdf-lib` (`^1.17.1`, dev-only) added purely to generate real
+PDF fixtures in tests (a genuinely blank page and a page with real drawn
+text) - no network/pre-existing PDF file needed for either test case.
+
+**Tests:** `tests/extraction/extract-text.test.ts` - 9 cases: Google Doc/
+Slides/Sheet export mapped and trimmed correctly (including confirming
+the exact `fileId`/`mimeType`/`responseType` arguments sent to the Drive
+API); a Doc that exports to whitespace-only returns `empty-content`; a
+plain-text file downloads and decodes correctly; an unsupported mime type
+is rejected *without* calling the Drive API at all (confirmed via
+`toHaveBeenCalled` on both `export` and `get`); a rejected Drive API call
+returns `extraction-failed` instead of throwing; and, using real
+`pdf-parse` against real `pdf-lib`-generated PDFs (no mocking - this
+logic has no live external dependency to fake): a PDF with real drawn
+text extracts that exact text, and a PDF with a real page but no text
+layer returns `scanned-pdf-ocr-not-implemented`. 19/19 passing
+(first extraction tests to exist - previously zero). `pnpm -r run
+typecheck` and `pnpm -r run build` pass clean across all 9 workspace
+packages.
+
+**Verified live** (real Drive API, real files - no mocks): ran
+`extractText` against all 7 real files found by Cycle 18's live check.
+All 7 (real Google Docs, TEST-prefixed recipe fixtures) extracted
+successfully, 454-807 characters each, with real recipe content visible
+in a preview of each result (category/cuisine/tags/ingredients text,
+confirming the export path returns genuinely structured recipe content,
+not just placeholder text). No Sheets, Slides, or PDF files exist in the
+real test folder, so those paths remain live-unverified beyond their unit
+tests - flagged below rather than glossed over.
+
+**Not done yet:** OCR for scanned PDFs (see above - detected, not
+implemented). Sheets/Slides/PDF extraction unverified against real Drive
+files of those types (only unit-tested + a synthetic PDF). No chunking
+(#4) yet - `extractText`'s output is whole-document text, not yet split
+into retrieval-sized pieces. Embeddings (#5), Pinecone writes (#6),
+dedup/versioning (#7), Postgres sync-state persistence (#8), scheduling
+(#9), and the retrieval endpoint (#10) are all still unstarted.
