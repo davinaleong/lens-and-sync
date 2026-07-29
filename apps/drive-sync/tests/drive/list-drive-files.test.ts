@@ -12,19 +12,43 @@ function fakeDrive(pages: Array<{ files: unknown[]; nextPageToken?: string }>) {
 describe("listDriveFiles", () => {
   it("maps Drive API file entries to DriveFileMetadata", async () => {
     const drive = fakeDrive([
-      { files: [{ id: "1", name: "a.txt", mimeType: "text/plain", modifiedTime: "2026-07-01T00:00:00.000Z" }] },
+      {
+        files: [
+          {
+            id: "1",
+            name: "a.txt",
+            mimeType: "text/plain",
+            modifiedTime: "2026-07-01T00:00:00.000Z",
+            webViewLink: "https://drive.google.com/file/d/1/view",
+          },
+        ],
+      },
     ]);
 
     const files = await listDriveFiles(drive, "folder-123");
 
-    expect(files).toEqual([{ id: "1", name: "a.txt", mimeType: "text/plain", modifiedTime: "2026-07-01T00:00:00.000Z" }]);
+    expect(files).toEqual([
+      {
+        id: "1",
+        name: "a.txt",
+        mimeType: "text/plain",
+        modifiedTime: "2026-07-01T00:00:00.000Z",
+        webViewLink: "https://drive.google.com/file/d/1/view",
+      },
+    ]);
   });
 
   it("skips entries missing a required field rather than including a partial record", async () => {
     const drive = fakeDrive([
       {
         files: [
-          { id: "1", name: "a.txt", mimeType: "text/plain", modifiedTime: "2026-07-01T00:00:00.000Z" },
+          {
+            id: "1",
+            name: "a.txt",
+            mimeType: "text/plain",
+            modifiedTime: "2026-07-01T00:00:00.000Z",
+            webViewLink: "https://drive.google.com/file/d/1/view",
+          },
           { id: "2", name: "no-mtype" },
         ],
       },
@@ -38,8 +62,11 @@ describe("listDriveFiles", () => {
 
   it("follows nextPageToken until pagination is exhausted, combining all pages", async () => {
     const drive = fakeDrive([
-      { files: [{ id: "1", name: "a", mimeType: "text/plain", modifiedTime: "t1" }], nextPageToken: "page-2" },
-      { files: [{ id: "2", name: "b", mimeType: "text/plain", modifiedTime: "t2" }] },
+      {
+        files: [{ id: "1", name: "a", mimeType: "text/plain", modifiedTime: "t1", webViewLink: "https://drive.google.com/1" }],
+        nextPageToken: "page-2",
+      },
+      { files: [{ id: "2", name: "b", mimeType: "text/plain", modifiedTime: "t2", webViewLink: "https://drive.google.com/2" }] },
     ]);
 
     const files = await listDriveFiles(drive, "folder-123");

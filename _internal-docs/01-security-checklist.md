@@ -33,10 +33,10 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 ## 4. DriveSync-Specific
 
 - [x] Google service account credentials scoped to only the target folder(s), not full Drive access. `createDriveAuthClient()` requests only the `drive.readonly` OAuth scope (never read-write `drive`); folder-level restriction is enforced in code by `listDriveFiles()` only ever querying the configured `GOOGLE_DRIVE_FOLDER_IDS` (`07-implementation-log.md` Cycle 18). Note: whether the service account's Drive *sharing* is itself limited to those folders is a Google Workspace admin/IAM setting outside this app's code — not something a `q` filter can enforce if the account were shared more broadly than intended.
-- [ ] Pinecone API key stored via secrets manager, not env files committed to the repo
-- [ ] Pinecone metadata never includes sensitive raw content — only IDs, titles, and retrieval-relevant fields
-- [ ] Namespace isolation in Pinecone if multiple folders/tenants are ever supported — prevent cross-tenant retrieval leakage
-- [ ] Stable vector ID scheme (`{fileId}-{chunkIndex}`) prevents duplicate/orphaned vectors on re-sync
+- [ ] Pinecone API key stored via secrets manager, not env files committed to the repo. Currently: `.env` is gitignored (never committed) — good enough for local dev, but no actual secrets manager (Vault/AWS Secrets Manager/Doppler) exists yet for staging/prod, per `06-toolchain-decisions.md`'s "still generic/deferred" list.
+- [x] Pinecone metadata never includes sensitive raw content — only IDs, titles, and retrieval-relevant fields. `upsertChunkVectors()`'s metadata is exactly `fileId`/`title`/`chunkIndex`/`sourceUrl`/`section` - never the chunk's extracted text itself; unit-tested (`07-implementation-log.md` Cycle 22).
+- [ ] Namespace isolation in Pinecone if multiple folders/tenants are ever supported — prevent cross-tenant retrieval leakage. Not yet relevant - only a single `default` namespace is used today (single Drive folder, single tenant); no multi-tenant scoping exists to test.
+- [x] Stable vector ID scheme (`{fileId}-{chunkIndex}`) prevents duplicate/orphaned vectors on re-sync. `vectorId()` is a pure deterministic function of file ID + chunk index; unit-tested that re-deriving it for the same file/chunk always produces the same ID, and verified live that a real upsert/fetch/query round-trip used exactly this ID scheme (`07-implementation-log.md` Cycle 22).
 - [ ] Deleted Drive files trigger actual Pinecone vector deletion, not just a DB flag — stale vectors are a data leakage risk in retrieval results
 - [ ] Sync job locking prevents concurrent runs from producing conflicting writes (BullMQ + Redis, see `06-toolchain-decisions.md`)
 

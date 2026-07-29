@@ -12,6 +12,13 @@ export interface EmbeddingOptions {
   batchSize?: number;
   maxRetries?: number;
   baseDelayMs?: number;
+  // `text-embedding-3-small` supports shortening its output via
+  // Matryoshka representation learning - pass this to match whatever
+  // dimension the target Pinecone index was actually provisioned with
+  // (Milestone #6's "dimension matching embedding model output" cuts both
+  // ways: the index must match the embeddings, not just the reverse).
+  // Omitted entirely means the model's own default (1536).
+  dimensions?: number;
   // Injectable so tests never actually wait out a real backoff delay -
   // same reasoning as every other external-dependency parameter in this
   // codebase (`redis`, `bucket`, `drive` client, etc.).
@@ -31,13 +38,14 @@ async function embedBatchWithRetry(
   client: EmbeddingClient,
   model: string,
   batch: string[],
+  dimensions: number | undefined,
   maxRetries: number,
   baseDelayMs: number,
   sleep: (ms: number) => Promise<void>,
 ): Promise<number[][] | null> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await client.embeddings.create({ model, input: batch });
+      const response = await client.embeddings.create({ model, input: batch, ...(dimensions ? { dimensions } : {}) });
       // Reorder by the API's own `index` rather than trusting array
       // order - defensive, since a caller pairing these embeddings back
       // up with `chunkText`'s output by position would silently
@@ -83,7 +91,7 @@ export async function generateEmbeddings(
   const embeddings: number[][] = [];
   for (let i = 0; i < texts.length; i += batchSize) {
     const batch = texts.slice(i, i + batchSize);
-    const result = await embedBatchWithRetry(client, model, batch, maxRetries, baseDelayMs, sleep);
+    const result = await embedBatchWithRetry(client, model, batch, options.dimensions, maxRetries, baseDelayMs, sleep);
     if (!result) {
       return { ok: false, reason: "embedding-failed" };
     }

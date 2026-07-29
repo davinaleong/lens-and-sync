@@ -1495,3 +1495,105 @@ retry/backoff code path.
 generated but not written anywhere; that's the next cycle. Dedup/versioning
 (#7), Postgres sync-state persistence (#8), scheduling (#9), and the
 retrieval endpoint (#10) remain unstarted.
+
+---
+
+## 2026-07-29 — Cycle 22: DriveSync Pinecone index writes
+
+**What:** `src/vector-store/index.ts`'s `upsertChunkVectors(index,
+vectors, options)` and `vectorId(fileId, chunkIndex)` - Milestone #6.
+`vectorId` is the stable `{fileId}-{chunkIndex}` scheme called for by the
+milestone: a pure, deterministic function, so re-syncing an unchanged or
+updated file re-derives the exact same IDs for its chunks and an upsert
+overwrites the prior vector in place rather than creating a
+duplicate/orphaned one alongside it. Metadata is deliberately narrow -
+`fileId`/`title`/`chunkIndex`/`sourceUrl`/`section` only, never the
+chunk's actual extracted text - directly implementing
+`01-security-checklist.md` §4's "Pinecone metadata never includes
+sensitive raw content." `section` is stored as `""` rather than
+`null`/omitted, since Pinecone metadata values are string/number/boolean/
+string-array only - there's no null in that type system. Upserts are
+batched (default 100 per call, Pinecone's own recommended size) and take
+the `Index` client as a parameter (same dependency-injection shape as
+every external-service call in this codebase), so this is unit-testable
+against a hand-built fake index. `src/vector-store/pinecone-client.ts`
+holds the one real `Pinecone`/`Index` singleton, scoped to the configured
+index + namespace via `.namespace()`.
+
+**Blocker hit and resolved mid-cycle:** the real `PINECONE_API_KEY` in
+`.env` turned out to be a placeholder (`defaultp...` - not Pinecone's real
+`pcsk_...` key format), confirmed by a real `listIndexes()` call coming
+back `PineconeAuthorizationError`. Flagged to the user rather than
+guessing around it; they supplied a real key. Once connected,
+`listIndexes()` revealed the pre-existing `drive-sync-dev` index is
+configured at **512 dimensions**, not `text-embedding-3-small`'s default
+1536 - a real mismatch that would have made every upsert in this cycle
+fail. Rather than delete/recreate the existing index (destructive, and
+not this session's call to make about infra someone else provisioned),
+`generateEmbeddings` (Cycle 21) gained an optional `dimensions` parameter
+using `text-embedding-3-small`'s Matryoshka-representation-learning
+support for shortened output, and a new `EMBEDDING_DIMENSIONS` config
+value (set to `512` locally) threads that through - Milestone #6's own
+wording, "dimension (matching embedding model output)," cuts both ways:
+the index has to match what's actually requested from the embedding
+model, and here that meant asking the model to match the index instead of
+the reverse.
+
+**Prerequisite addition:** `DriveFileMetadata` (Cycle 18) gained a
+required `webViewLink` field - Drive's own canonical "open this file" URL,
+now requested via `listDriveFiles`'s `fields` parameter. Used as-is for
+the "source URL" metadata field rather than hand-constructing a
+per-mime-type URL scheme, which would have to track Drive's URL format
+for every file type separately (Docs vs. Sheets vs. Slides vs. arbitrary
+uploads) and could silently drift from whatever Drive actually serves.
+This is a real, if small, change to an earlier cycle's contract - the
+blast radius was checked first: `extraction/index.ts` and `chunking/index.ts`
+both take narrower inline types (`{ id, mimeType }` / `{ fileId, title }`)
+rather than the full `DriveFileMetadata`, so neither was affected; only
+`drive/index.ts`'s own tests needed updating (fixtures gained the new
+field).
+
+**Tests:** `tests/vector-store/upsert-chunk-vectors.test.ts` - 8 cases
+against a hand-built fake `Index`: `vectorId` is deterministic and stable
+across repeated calls for the same file/chunk; empty input returns
+`{ ok: true, count: 0 }` without calling the API; a single vector upserts
+with the exact expected ID and metadata shape; a `null` section is stored
+as `""`; metadata keys are confirmed to be exactly the five allowed
+fields (regression test against ever accidentally including raw text); a
+5-vector list with `batchSize: 2` splits into 3 calls; an API rejection
+returns `upsert-failed` rather than throwing.
+`tests/embeddings/generate-embeddings.test.ts` gained 2 cases for the new
+`dimensions` passthrough (configured value sent to the API; omitted
+entirely when not configured). `tests/drive/*.test.ts` fixtures updated
+with the new `webViewLink` field. 47/47 tests passing across the app (39
+pre-existing + 8 here). `pnpm -r run typecheck` and `pnpm -r run build`
+pass clean across all 9 workspace packages.
+
+**Verified live end-to-end** (real Drive, real OpenAI, real Pinecone - no
+mocks anywhere in this chain): all 7 real Drive docs → real `extractText`
+→ real `chunkText` → real `generateEmbeddings` with `dimensions: 512`
+(confirmed the returned vectors were genuinely 512-dimensional, matching
+the real index) → real `upsertChunkVectors` against the real
+`drive-sync-dev` index/`default` namespace. `describeIndexStats()`
+afterward showed exactly 7 records in the `default` namespace at
+dimension 512. Fetched one vector back by its exact `{fileId}-{chunkIndex}`
+ID and confirmed its metadata round-tripped correctly, including a real
+`sourceUrl` (`https://docs.google.com/document/d/.../edit?usp=drivesdk` -
+a genuine Drive URL, not a placeholder). Ran a real similarity query for
+"How do I make banana pancakes?" and got the real "TEST: Banana Pancakes"
+document back as the top match (score 0.71) by a wide margin over the
+next candidates (0.32, 0.32) - concrete proof the whole pipeline produces
+retrieval-quality results, not just structurally valid API calls. All 7
+test vectors were deleted from the real index afterward
+(`describeIndexStats()` reconfirmed 0 records remaining) - no test data
+left in shared infrastructure.
+
+**Not done yet:** dedup/versioning (#7) - nothing yet skips unchanged
+files via content-hash comparison, and deleted Drive files don't trigger
+Pinecone vector deletion (this cycle's `upsertChunkVectors` only writes,
+it never deletes). Postgres sync-state persistence (#8) - the `DriveFile`
+Prisma model still has no reader/writer in `drive-sync`, so `detectChanges`
+(Cycle 18) has never actually been called against real historical sync
+state, only hand-built known-file lists. Scheduling (#9) and the
+retrieval endpoint (#10) remain unstarted. Namespace isolation for
+multiple tenants is untested (not yet relevant - single namespace only).

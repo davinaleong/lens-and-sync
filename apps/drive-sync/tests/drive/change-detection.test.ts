@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { detectChanges, type DriveFileMetadata, type KnownFileRecord } from "../../src/drive/index.js";
 
 function file(overrides: Partial<DriveFileMetadata>): DriveFileMetadata {
-  return { id: "file-1", name: "doc.txt", mimeType: "text/plain", modifiedTime: "2026-07-01T00:00:00.000Z", ...overrides };
+  return {
+    id: "file-1",
+    name: "doc.txt",
+    mimeType: "text/plain",
+    modifiedTime: "2026-07-01T00:00:00.000Z",
+    webViewLink: "https://drive.google.com/file/d/file-1/view",
+    ...overrides,
+  };
 }
 
 function known(overrides: Partial<KnownFileRecord>): KnownFileRecord {

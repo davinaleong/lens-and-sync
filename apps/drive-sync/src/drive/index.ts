@@ -10,6 +10,12 @@ export interface DriveFileMetadata {
   name: string;
   mimeType: string;
   modifiedTime: string;
+  // Drive's own canonical "open this file" URL - used as-is for the
+  // "source URL" field in Pinecone metadata (`vector-store/index.ts`)
+  // rather than hand-constructing a per-mime-type URL, which would need
+  // to track Drive's URL scheme for every file type separately and could
+  // drift from what Drive actually serves.
+  webViewLink: string;
 }
 
 // The Drive API's `q` query language delimits string literals with single
@@ -37,14 +43,14 @@ export async function listDriveFiles(drive: drive_v3.Drive, folderId: string): P
   do {
     const res = await drive.files.list({
       q: `'${escapeForDriveQuery(folderId)}' in parents and trashed = false`,
-      fields: "nextPageToken, files(id, name, mimeType, modifiedTime)",
+      fields: "nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)",
       pageSize: 1000,
       pageToken,
     });
 
     for (const f of res.data.files ?? []) {
-      if (f.id && f.name && f.mimeType && f.modifiedTime) {
-        files.push({ id: f.id, name: f.name, mimeType: f.mimeType, modifiedTime: f.modifiedTime });
+      if (f.id && f.name && f.mimeType && f.modifiedTime && f.webViewLink) {
+        files.push({ id: f.id, name: f.name, mimeType: f.mimeType, modifiedTime: f.modifiedTime, webViewLink: f.webViewLink });
       }
     }
 

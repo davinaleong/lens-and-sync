@@ -18,6 +18,22 @@ describe("generateEmbeddings", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("passes a configured dimensions value through to the API call", async () => {
+    const create = vi.fn().mockResolvedValue({ data: [{ index: 0, embedding: [0.1] }] });
+
+    await generateEmbeddings(fakeClient(create), "text-embedding-3-small", ["a"], { dimensions: 512 });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ dimensions: 512 }));
+  });
+
+  it("omits dimensions entirely from the API call when not configured", async () => {
+    const create = vi.fn().mockResolvedValue({ data: [{ index: 0, embedding: [0.1] }] });
+
+    await generateEmbeddings(fakeClient(create), "text-embedding-3-small", ["a"]);
+
+    expect(create.mock.calls[0][0]).not.toHaveProperty("dimensions");
+  });
+
   it("returns one embedding per input text, in input order, using the response's index field", async () => {
     // Response deliberately out of order - the reorder-by-index logic
     // must correct this, not just trust array position.

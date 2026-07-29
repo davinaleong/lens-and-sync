@@ -25,6 +25,12 @@ const schema = z.object({
 
   OPENAI_API_KEY: z.string().min(1),
   EMBEDDING_MODEL: z.string().min(1),
+  // Must match the target Pinecone index's own configured dimension -
+  // `text-embedding-3-small` defaults to 1536 but supports shortening via
+  // the `dimensions` request parameter. Optional: omitted means "use the
+  // model's default," which only works if the Pinecone index was created
+  // with that same default dimension.
+  EMBEDDING_DIMENSIONS: z.coerce.number().optional(),
 
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
