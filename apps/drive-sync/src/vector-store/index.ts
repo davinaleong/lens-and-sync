@@ -76,3 +76,58 @@ export async function upsertChunkVectors(index: Index, vectors: ChunkVector[], o
     return { ok: false, reason: "upsert-failed" };
   }
 }
+
+export type DeleteResult = { ok: true; deletedCount: number } | { ok: false; reason: "delete-failed" };
+
+/**
+ * Deletes every vector belonging to a Drive file that's been deleted (or
+ * moved out of the tracked folder) - Milestone #7's "delete stale
+ * Pinecone vectors on file deletion" and `01-security-checklist.md` §4's
+ * "stale vectors are a data leakage risk in retrieval results."
+ *
+ * Deliberately does NOT delete by metadata filter (`index.deleteMany({
+ * fileId: { $eq } })`) even though the SDK's types allow it - Pinecone's
+ * serverless indexes (what this project actually uses, confirmed live in
+ * Cycle 22) don't support delete-by-metadata-filter, only pod-based
+ * indexes do. Instead, `listPaginated({ prefix })` finds every vector ID
+ * matching `{fileId}-` (safe because `vectorId()`'s scheme guarantees
+ * every one of a file's chunk IDs shares that exact prefix and no other
+ * file's IDs can), then deletes that explicit ID list - `listPaginated`
+ * is documented as serverless-only, the opposite constraint, so this is
+ * the one approach that works on the index this project actually has.
+ *
+ * Theoretical caveat: a prefix match is only unambiguous if no Drive file
+ * ID is itself a prefix of another file's ID followed by `-` (e.g. file
+ * `abc` vs. file `abc-xyz`, whose own chunk `0` would be ID `abc-xyz-0`,
+ * matching the prefix `abc-`). Real Drive file IDs are long (~33-44 char),
+ * effectively-random base64url strings, so this isn't a realistic risk in
+ * practice - documented rather than engineered around, since the
+ * `{fileId}-{chunkIndex}` scheme itself is specified by the milestone and
+ * changing the delimiter wouldn't fully eliminate the theoretical
+ * possibility anyway (Drive IDs may contain both `-` and `_`).
+ */
+export async function deleteVectorsForFile(index: Index, fileId: string): Promise<DeleteResult> {
+  try {
+    const ids: string[] = [];
+    let paginationToken: string | undefined;
+
+    do {
+      const page = await index.listPaginated({ prefix: `${fileId}-`, paginationToken });
+      for (const item of page.vectors ?? []) {
+        if (item.id) {
+          ids.push(item.id);
+        }
+      }
+      paginationToken = page.pagination?.next;
+    } while (paginationToken);
+
+    if (ids.length === 0) {
+      return { ok: true, deletedCount: 0 };
+    }
+
+    await index.deleteMany(ids);
+    return { ok: true, deletedCount: ids.length };
+  } catch {
+    return { ok: false, reason: "delete-failed" };
+  }
+}

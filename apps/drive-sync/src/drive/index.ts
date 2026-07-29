@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { google, type drive_v3 } from "googleapis";
 import type { JWT } from "google-auth-library";
 
@@ -103,4 +104,29 @@ export function detectChanges(currentFiles: DriveFileMetadata[], knownFiles: Kno
   const deletedFileIds = knownFiles.filter((known) => !currentIds.has(known.driveFileId)).map((known) => known.driveFileId);
 
   return { newFiles, updatedFiles, deletedFileIds };
+}
+
+/**
+ * Content-level change detection (Milestone #7), a second, more precise
+ * layer beneath `detectChanges`'s Drive `modifiedTime` check: Drive can
+ * report a `modifiedTime` change for a metadata-only edit (renamed,
+ * moved, permissions touched) with no actual change to the extracted
+ * text. Hashing the *extracted* text (not the raw file bytes - two
+ * different Docs exports of literally-unchanged content are byte-for-byte
+ * consistent for our purposes) and comparing against what was last stored
+ * lets a caller skip the OpenAI/Pinecone cost of re-embedding a file
+ * whose real content didn't change, even though `detectChanges` already
+ * flagged it as "updated."
+ */
+export function computeContentHash(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/**
+ * `knownContentHash` is `null` for a file with no prior recorded hash
+ * (new file, or one synced before this feature existed) - always
+ * re-embed in that case, since there's nothing to compare against.
+ */
+export function shouldReembedFile(newContentHash: string, knownContentHash: string | null): boolean {
+  return knownContentHash === null || knownContentHash !== newContentHash;
 }

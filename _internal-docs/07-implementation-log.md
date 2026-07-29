@@ -1597,3 +1597,74 @@ Prisma model still has no reader/writer in `drive-sync`, so `detectChanges`
 state, only hand-built known-file lists. Scheduling (#9) and the
 retrieval endpoint (#10) remain unstarted. Namespace isolation for
 multiple tenants is untested (not yet relevant - single namespace only).
+
+---
+
+## 2026-07-29 — Cycle 23: DriveSync dedup & versioning
+
+**What:** Milestone #7, split into its two independent halves:
+
+- **Content-hash dedup** (`drive/index.ts`): `computeContentHash(text)` -
+  a plain `sha256` of the *extracted* text (not raw file bytes - two Docs
+  exports of unchanged content are byte-identical for this purpose), and
+  `shouldReembedFile(newHash, knownHash)`. This is a second, more precise
+  layer beneath `detectChanges`'s (Cycle 18) `modifiedTime` check: Drive
+  can report a `modifiedTime` change for a metadata-only edit (rename,
+  move, permission change) with no actual change to the extracted text,
+  and re-embedding is the expensive part of a sync (real OpenAI/Pinecone
+  cost) - `shouldReembedFile` lets a caller skip that cost for a file
+  `detectChanges` already flagged as "updated" but whose real content
+  didn't change. `knownHash: null` (no prior record) always returns
+  `true` - nothing to compare against yet.
+- **Stale vector deletion** (`vector-store/index.ts`):
+  `deleteVectorsForFile(index, fileId)`. The real design decision here:
+  Pinecone's metadata-filter delete (`index.deleteMany({ fileId: { $eq }
+  })`, which the SDK's types technically allow) **does not work on
+  serverless indexes** - only pod-based ones. Since Cycle 22 already
+  confirmed live that this project's real index is serverless, that
+  path would have failed in production despite typechecking and probably
+  working against a mocked test. Used `listPaginated({ prefix:
+  '${fileId}-' })` instead - explicitly documented as serverless-only in
+  the SDK, the *opposite* constraint - to find every vector ID belonging
+  to a file (safe because `vectorId()`'s `{fileId}-{chunkIndex}` scheme
+  guarantees the prefix), then deletes that explicit ID list. Documented,
+  not "fixed": a theoretical prefix-collision case (file ID `abc` vs. file
+  ID `abc-xyz`) exists but isn't realistic given Drive's actual ~33-44
+  character random file IDs.
+
+**Tests:** `tests/drive/content-hash.test.ts` - 7 cases: identical text
+hashes identically; different text hashes differently; whitespace-only
+differences still change the hash (confirms this is an exact-text hash,
+not a semantic one); output is a real 64-hex-char sha256; `shouldReembedFile`
+returns `true` for a `null` known hash, `true` for a differing hash,
+`false` for a matching hash. `tests/vector-store/delete-vectors-for-file.test.ts`
+- 5 cases against a hand-built fake index: no matches means
+`deletedCount: 0` and `deleteMany` is never called at all; the query uses
+the correct `{fileId}-` prefix; matching IDs are collected and deleted;
+pagination is followed across multiple pages before deleting; an API
+rejection returns `delete-failed` rather than throwing. 59/59 tests
+passing across the app (47 pre-existing + 12 here). `pnpm -r run
+typecheck` and `pnpm -r run build` pass clean across all 9 workspace
+packages.
+
+**Verified live** (real Drive, real Pinecone - no mocks): two independent
+real `extractText` calls against the same real Drive doc produced
+identical `computeContentHash` output, and `shouldReembedFile` behaved
+correctly against that real hash in all three cases (no prior record,
+matching, differing). Separately, upserted 3 real vectors for a
+fabricated "target" file ID plus 1 for an unrelated "other" file ID into
+the real `drive-sync-dev` index, confirmed 4 records via
+`describeIndexStats()`, ran `deleteVectorsForFile` for the target file
+ID, and confirmed exactly 3 records were deleted (`deletedCount: 3`,
+`describeIndexStats()` dropped to 1) - and, critically, that the
+unrelated file's vector was still fetchable afterward, proving the
+prefix-based delete didn't over-delete. All test vectors (including the
+"other" file's) were removed afterward, confirmed via a final
+`describeIndexStats()` showing 0 records.
+
+**Not done yet:** Postgres sync-state persistence (#8) - `shouldReembedFile`
+and `deleteVectorsForFile` both exist now but have no real caller yet,
+since there's still no reader/writer for the `DriveFile` Prisma model to
+supply the "known" content hash or to know which files were actually
+deleted in a real sync run. That's the next cycle. Scheduling (#9) and
+the retrieval endpoint (#10) remain unstarted.
