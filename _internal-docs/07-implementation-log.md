@@ -1322,3 +1322,95 @@ files of those types (only unit-tested + a synthetic PDF). No chunking
 into retrieval-sized pieces. Embeddings (#5), Pinecone writes (#6),
 dedup/versioning (#7), Postgres sync-state persistence (#8), scheduling
 (#9), and the retrieval endpoint (#10) are all still unstarted.
+
+---
+
+## 2026-07-29 — Cycle 20: DriveSync chunking strategy
+
+**What:** `src/chunking/index.ts`'s `chunkText(text, source, options)` -
+Milestone #4. Token-budgeted, not character-budgeted: `js-tiktoken`'s
+`encodingForModel("text-embedding-3-small")` (resolves to `cl100k_base`,
+the same encoding the actual embedding model uses) counts tokens per
+line, so a chunk's size is measured the way the embedding API will
+actually measure it, not an approximation. Accumulates whole lines into a
+buffer until the next line would push it over `chunkSizeTokens` (default
+400), then starts the next chunk by first flushing the current one, then
+seeding the new buffer with however many trailing lines from the
+just-finished chunk fit within `overlapTokens` (default 60) - so
+retrieval context survives a hard chunk boundary. A single line that's
+already over budget on its own is flushed as its own dedicated chunk
+(bypassing the normal overlap-seed path, which would otherwise glue it to
+unrelated leading content - caught by a test, see below) rather than
+being silently dropped or truncated mid-token.
+
+Every chunk carries `fileId`/`title` (Milestone #4's "preserve source
+metadata") plus a `section` - the most recent heading-like line before
+the chunk started. Since Drive's plain-text export strips all real
+formatting (no bold, no heading level - see `extraction/index.ts`),
+"heading-like" has to be a text heuristic, not real structure. The final
+heuristic: a trimmed line that ends in a bare colon with nothing after it
+(`Ingredients:`, `Steps:`, `Notes:`) - which correctly excludes `Key:
+value` metadata lines like `Category: Main Course` (content follows the
+colon, so it doesn't match).
+
+**Two real bugs caught only by testing against live data, not assumed
+correct from the design doc:**
+
+1. **First heading heuristic was far too permissive.** The original rule
+   ("short line, doesn't end in sentence punctuation") flagged ordinary
+   short content lines (`"bake"`, `"mix"`, `"flour"`) as headings in a
+   unit test using made-up text - then, pulling a *real* extracted Doc's
+   full text to investigate, found the actual structure: list items start
+   with `*`/`1.` markers and real section labels end in a bare `:`.
+   Rewrote the heuristic around that real signal instead of a guess.
+2. **`\r\n` line endings.** The same real-text pull revealed Drive's
+   plain-text export uses `\r\n`, not `\n` - `text.split("\n")` would have
+   left every line carrying a trailing `\r`, silently breaking the new
+   `endsWith(":")` heading check (and leaking `\r` into chunk text).
+   Normalizing line endings before splitting fixed both.
+
+**Also caught by a test, not live data:** the oversized-single-line case
+initially produced a chunk that combined the huge line with leftover
+overlap-seed content from the previous chunk, instead of isolating it -
+restructured to check "is this segment alone already over budget" *before*
+the normal overlap-seeding path, flushing any pending buffer first with no
+seeding into the oversized chunk.
+
+**Prerequisite addition:** `js-tiktoken` (`^1.0.21`) - a pure-TypeScript,
+no-native-bindings port of OpenAI's tokenizer with `cl100k_base`'s rank
+data bundled locally (no runtime network fetch needed to tokenize).
+
+**Tests:** `tests/chunking/chunk-text.test.ts` - 9 cases: text well under
+budget stays one chunk; empty/whitespace-only text returns no chunks; text
+over budget splits into multiple chunks, each within budget plus one
+line's slack; `chunkIndex` values are sequential from zero; the end of one
+chunk's content reappears at the start of the next when `overlapTokens >
+0`; no overlap occurs when `overlapTokens` is `0`; a real bare-colon
+heading is tracked as `section` across subsequent chunks; a `Key: value`
+line is confirmed *not* picked up as a heading (regression test for bug
+#1 above); an oversized single line becomes its own chunk rather than
+being combined or dropped. 28/28 passing across the app (19 pre-existing +
+9 here). `pnpm -r run typecheck` and `pnpm -r run build` pass clean across
+all 9 workspace packages.
+
+**Verified live** (real Drive files, real extracted text - no mocks): ran
+`extractText` + `chunkText` (`chunkSizeTokens: 60`, deliberately small to
+force multiple chunks per short recipe doc) against all 7 real files from
+the test folder. Every document split into 3-5 chunks; every chunk's
+`section` correctly reflects `Ingredients:`/`Steps:` (or `null` before the
+first heading), never a `Category:`/`Cuisine:`/`Tags:` metadata line;
+token counts per chunk stayed within budget plus one line's slack, matching
+the unit-tested behavior; overlap was visible in the raw output (the
+tail of one chunk's text reappearing at the head of the next). This is
+the same live data that surfaced both real bugs above - the fixes were
+verified against the exact documents that exposed them, not just the
+now-passing unit tests.
+
+**Not done yet:** Sheets/Slides/PDF-derived text has never actually been
+chunked against real files of those types (extraction itself is
+real-data-verified per Cycle 19, but no real non-Doc file exists in the
+test folder to chunk). Embeddings (#5), Pinecone writes (#6),
+dedup/versioning (#7), Postgres sync-state persistence (#8), scheduling
+(#9), and the retrieval endpoint (#10) are all still unstarted - nothing
+yet calls `chunkText`'s output for anything beyond this cycle's
+verification script.

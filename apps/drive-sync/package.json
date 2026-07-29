@@ -30,6 +30,7 @@
     "googleapis": "^140.0.0",
     "helmet": "^7.1.0",
     "ioredis": "^5.4.1",
+    "js-tiktoken": "^1.0.21",
     "openai": "^4.60.0",
     "pdf-parse": "^2.4.5",
     "rate-limit-redis": "^4.2.0",
