@@ -1414,3 +1414,84 @@ dedup/versioning (#7), Postgres sync-state persistence (#8), scheduling
 (#9), and the retrieval endpoint (#10) are all still unstarted - nothing
 yet calls `chunkText`'s output for anything beyond this cycle's
 verification script.
+
+---
+
+## 2026-07-29 — Cycle 21: DriveSync embedding generation (OpenAI)
+
+**What:** `src/embeddings/index.ts` implements `generateEmbeddings(client,
+model, texts, options)` - Milestone #5. Same dependency-injection shape
+as every external-service call in this codebase: `client` is `Pick<OpenAI,
+"embeddings">`, so tests never touch the network.
+
+- **Batching:** splits `texts` into batches of `batchSize` (default 100)
+  before calling `client.embeddings.create({ model, input: batch })` -
+  OpenAI caps a single request at 2048 input items and 300,000 tokens
+  summed across all inputs, and 100 chunks per batch stays comfortably
+  under both given `chunking/index.ts`'s ~400-460-token chunk sizes.
+  Batches are processed sequentially, not in parallel - firing every batch
+  at once would be more likely to *cause* rate limiting than avoid it.
+- **Rate limits/retries:** a batch that fails with a `429` or `5xx` is
+  retried with exponential backoff (`baseDelayMs * 2^attempt`, default
+  base 500ms) up to `maxRetries` (default 3) before giving up; any other
+  error (e.g. a `400` from malformed input) fails immediately without
+  retrying, since retrying a request that will deterministically fail
+  again wastes time and quota for no benefit. `sleep` is an injectable
+  parameter (same reasoning as `redis`/`bucket`/`drive` elsewhere in this
+  codebase), so tests exercise real retry-count and backoff-timing logic
+  without actually waiting.
+- **Ordering correctness:** the response's own `index` field is used to
+  reorder each batch's embeddings before returning them, rather than
+  trusting the response array's position - defensive, since a caller
+  pairing embeddings back up with `chunkText`'s chunks by array position
+  would silently mismatch vectors to the wrong chunk text if that
+  assumption were ever violated.
+- **All-or-nothing per call:** if any batch exhausts its retries, the
+  whole call returns `{ ok: false, reason: "embedding-failed" }` rather
+  than a partial list with silent gaps - a file's chunks are either fully
+  embedded or the sync for that file didn't happen, never
+  inconsistently half-vectorized without a caller noticing.
+
+Note: the OpenAI SDK already has its own built-in retry behavior
+(`maxRetries` client option, silent). This module's retry layer sits on
+top of that deliberately - it's explicit, testable, and its exhaustion is
+visible to the caller as a real `embedding-failed` result, rather than
+relying entirely on an opaque SDK default.
+
+**Tests:** `tests/embeddings/generate-embeddings.test.ts` - 9 cases
+against a hand-built fake client: empty input returns an empty result
+without calling the API at all; a response with out-of-order `index`
+values is correctly reordered; input splits into the expected number of
+batches for a given `batchSize`; a `429` is retried and succeeds once the
+mocked API recovers; a `503` is retried the same way as a `429`; backoff
+delays are confirmed exponential (`100`, then `200`, for `baseDelayMs:
+100`); a non-retryable `400` fails immediately with zero retries/sleeps;
+exhausting `maxRetries` returns `embedding-failed` after the expected
+total call count (initial + N retries); a failure in *any* batch fails
+the whole multi-batch call rather than returning a partial result.
+37/37 tests passing across the app (28 pre-existing + 9 here). `pnpm -r
+run typecheck` and `pnpm -r run build` pass clean across all 9 workspace
+packages.
+
+**Verified live** (real OpenAI API, real chunked text - no mocks): ran
+`chunkText` (small `chunkSizeTokens: 40` to force multiple chunks per
+short recipe doc) over all 7 real extracted Drive docs, producing 42
+total chunks, then called `generateEmbeddings` against the real API with
+`batchSize: 5` (forcing 9 real separate batched requests, not one big
+call). Got 42 real embeddings back, all dimension 1536 (matching
+`text-embedding-3-small`'s documented output size). As a sanity check
+that these are genuine semantic embeddings and not just distinct random
+vectors: cosine similarity between two chunks of the *same* real document
+("TEST: Creamy Mushroom Pasta") was 0.75, versus 0.42 between chunks of
+two *different* documents - same-document similarity meaningfully higher,
+as expected for real embeddings of related recipe content. Retry-on-error
+behavior itself was intentionally left to the unit tests above rather
+than re-verified against the real API - deliberately triggering a real
+rate limit or server error against a live paid API isn't a reasonable way
+to verify it, and the mocked-client tests already exercise the exact
+retry/backoff code path.
+
+**Not done yet:** Pinecone writes (#6) - these 42 real embeddings were
+generated but not written anywhere; that's the next cycle. Dedup/versioning
+(#7), Postgres sync-state persistence (#8), scheduling (#9), and the
+retrieval endpoint (#10) remain unstarted.
