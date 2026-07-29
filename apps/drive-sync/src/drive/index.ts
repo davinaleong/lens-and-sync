@@ -1,2 +1,100 @@
-// TODO: Drive API client, change detection (new/updated/deleted files)
-export {};
+import { google, type drive_v3 } from "googleapis";
+import type { JWT } from "google-auth-library";
+
+export function createDriveClient(auth: JWT): drive_v3.Drive {
+  return google.drive({ version: "v3", auth });
+}
+
+export interface DriveFileMetadata {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime: string;
+}
+
+// The Drive API's `q` query language delimits string literals with single
+// quotes and expects a literal quote inside one to be backslash-escaped
+// (per Drive's own docs) - defensive even though `folderId` only ever
+// comes from admin-configured `GOOGLE_DRIVE_FOLDER_IDS`, never client
+// input.
+function escapeForDriveQuery(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+/**
+ * Lists every non-trashed file directly inside `folderId`, paginating
+ * through Drive's `nextPageToken` until exhausted. Takes an already-
+ * constructed `drive_v3.Drive` client as a parameter (same
+ * dependency-injection shape as every DishLens external-service call -
+ * `vision/index.ts`'s client, `recipe/index.ts`'s client) so this is
+ * unit-testable against a hand-built fake client, no live credentials or
+ * network needed.
+ */
+export async function listDriveFiles(drive: drive_v3.Drive, folderId: string): Promise<DriveFileMetadata[]> {
+  const files: DriveFileMetadata[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const res = await drive.files.list({
+      q: `'${escapeForDriveQuery(folderId)}' in parents and trashed = false`,
+      fields: "nextPageToken, files(id, name, mimeType, modifiedTime)",
+      pageSize: 1000,
+      pageToken,
+    });
+
+    for (const f of res.data.files ?? []) {
+      if (f.id && f.name && f.mimeType && f.modifiedTime) {
+        files.push({ id: f.id, name: f.name, mimeType: f.mimeType, modifiedTime: f.modifiedTime });
+      }
+    }
+
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return files;
+}
+
+// The subset of a `DriveFile` Prisma record that change detection needs -
+// deliberately not the full model, so this stays decoupled from the ORM
+// shape and easy to unit-test with plain objects.
+export interface KnownFileRecord {
+  driveFileId: string;
+  driveModifiedTime: string;
+}
+
+export interface ChangeSet {
+  newFiles: DriveFileMetadata[];
+  updatedFiles: DriveFileMetadata[];
+  deletedFileIds: string[];
+}
+
+/**
+ * Pure comparison between the current live folder listing and the
+ * previously-synced state (Milestone #2). A file is "new" if its ID isn't
+ * in `knownFiles` at all, "updated" if Drive's `modifiedTime` is strictly
+ * newer than what was last recorded, and "deleted" if a previously-known
+ * ID no longer appears in the current listing - covers Drive-side moves
+ * out of the folder the same as an actual deletion, which is the correct
+ * behavior here since this app only ever tracks files *inside* the
+ * configured folder(s).
+ */
+export function detectChanges(currentFiles: DriveFileMetadata[], knownFiles: KnownFileRecord[]): ChangeSet {
+  const knownById = new Map(knownFiles.map((file) => [file.driveFileId, file]));
+  const currentIds = new Set(currentFiles.map((file) => file.id));
+
+  const newFiles: DriveFileMetadata[] = [];
+  const updatedFiles: DriveFileMetadata[] = [];
+
+  for (const file of currentFiles) {
+    const known = knownById.get(file.id);
+    if (!known) {
+      newFiles.push(file);
+    } else if (new Date(file.modifiedTime).getTime() > new Date(known.driveModifiedTime).getTime()) {
+      updatedFiles.push(file);
+    }
+  }
+
+  const deletedFileIds = knownFiles.filter((known) => !currentIds.has(known.driveFileId)).map((known) => known.driveFileId);
+
+  return { newFiles, updatedFiles, deletedFileIds };
+}

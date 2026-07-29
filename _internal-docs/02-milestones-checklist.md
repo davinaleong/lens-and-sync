@@ -6,8 +6,8 @@ Toolchain: pnpm + Turborepo (proposed default) · Pinecone · Redis · Postgres 
 
 ## DriveSync — Google Drive → Pinecone Vector Sync API
 
-- [ ] **1. Auth & access** — Google service account/OAuth setup scoped to target folder(s); Pinecone API key setup
-- [ ] **2. Change detection** — list folder contents, track file IDs + modification timestamps, detect new/updated/deleted files
+- [ ] **1. Auth & access** — Google service account/OAuth setup scoped to target folder(s); Pinecone API key setup. Drive half done: `createDriveAuthClient()` (`drive.readonly` scope only), verified live against the real `drivesync@lens-and-sync.iam.gserviceaccount.com` service account and a real 7-file test Drive folder (`07-implementation-log.md` Cycle 18). Pinecone key setup not started — that's Milestone #6.
+- [x] **2. Change detection** — list folder contents, track file IDs + modification timestamps, detect new/updated/deleted files. `listDriveFiles()` + `detectChanges()` implemented, unit-tested, and verified live against a real Drive folder (7 real files) covering all three branches (new/updated/deleted) with exactly the expected results (`07-implementation-log.md` Cycle 18).
 - [ ] **3. Extraction pipeline** — convert Docs/Sheets/PDFs/Slides to plain text; OCR for scanned PDFs if needed
 - [ ] **4. Chunking strategy** — split text into retrieval-sized chunks with overlap; preserve source metadata (file ID, title, section)
 - [ ] **5. Embedding generation** — OpenAI `text-embedding-3-small`, batch requests, handle rate limits/retries (see `06-toolchain-decisions.md`)

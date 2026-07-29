@@ -32,7 +32,7 @@ Updated for the finalized toolchain: Pinecone (vector store), Redis (session sta
 
 ## 4. DriveSync-Specific
 
-- [ ] Google service account credentials scoped to only the target folder(s), not full Drive access
+- [x] Google service account credentials scoped to only the target folder(s), not full Drive access. `createDriveAuthClient()` requests only the `drive.readonly` OAuth scope (never read-write `drive`); folder-level restriction is enforced in code by `listDriveFiles()` only ever querying the configured `GOOGLE_DRIVE_FOLDER_IDS` (`07-implementation-log.md` Cycle 18). Note: whether the service account's Drive *sharing* is itself limited to those folders is a Google Workspace admin/IAM setting outside this app's code — not something a `q` filter can enforce if the account were shared more broadly than intended.
 - [ ] Pinecone API key stored via secrets manager, not env files committed to the repo
 - [ ] Pinecone metadata never includes sensitive raw content — only IDs, titles, and retrieval-relevant fields
 - [ ] Namespace isolation in Pinecone if multiple folders/tenants are ever supported — prevent cross-tenant retrieval leakage

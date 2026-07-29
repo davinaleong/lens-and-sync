@@ -1148,3 +1148,91 @@ endpoint that accepts free text existing at all (see above). `drive-sync`
 still has no real routes to apply `requireMultipartContentType`-style
 per-route validation to - only the app-level hardening (CSP, HTTPS
 enforcement, fallback error handler) applies there so far.
+
+---
+
+## 2026-07-29 — Cycle 18: DriveSync Google Drive auth + change detection
+
+**What:** First real business logic in `drive-sync` - Milestone #1 (Drive
+half) and #2. `src/auth/index.ts`'s `createDriveAuthClient(email,
+keyFile)` builds a `google.auth.JWT` scoped to `drive.readonly` only -
+this app only ever reads content to sync into Pinecone, never writes to
+Drive, so the broader read-write `drive` scope would be an unnecessary
+privilege (`01-security-checklist.md` §4). `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+was renamed to `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` in `config.ts`/
+`.env.example` - inspecting the real `.env` showed the value has always
+been a path to a service-account JSON key file (matching dish-lens's
+`GOOGLE_CLOUD_CREDENTIALS_JSON` convention), not raw key material, so the
+old name was actively misleading. While fixing that, found the same class
+of off-by-one relative-path bug Cycle 11 hit for dish-lens's credentials
+path (`../` instead of `../../`, resolving from the app's own cwd) and
+fixed it in the local `.env` (not committed).
+
+`src/drive/index.ts`:
+- `createDriveClient(auth)` - thin factory wrapping `google.drive({
+  version: "v3", auth })`.
+- `listDriveFiles(drive, folderId)` - lists every non-trashed file
+  directly inside `folderId`, paginating through `nextPageToken` until
+  exhausted. Takes the `drive_v3.Drive` client as a parameter (same
+  dependency-injection shape as every DishLens external-service call), so
+  it's unit-testable against a hand-built fake client. Escapes a literal
+  single quote in `folderId` before interpolating it into Drive's `q`
+  query language (defensive - `folderId` is always admin-configured via
+  `GOOGLE_DRIVE_FOLDER_IDS`, never client input, but the escape is cheap
+  and correct per Drive's own docs).
+- `detectChanges(currentFiles, knownFiles)` - the actual Milestone #2
+  logic, a pure function with no I/O: a file is "new" if its ID isn't in
+  the known set, "updated" if Drive's `modifiedTime` is strictly newer
+  than what was last recorded, "deleted" if a previously-known ID no
+  longer appears in the current listing (also correctly catches a file
+  being *moved out* of the tracked folder, not just an actual Drive
+  deletion - the right behavior since this app only tracks files inside
+  the configured folder(s)).
+
+**Prerequisite fix:** `google-auth-library` (needed for the `JWT` type
+used by both new files) was only a transitive dependency of `googleapis`,
+not declared directly - pnpm's isolated `node_modules` doesn't let a
+package import an undeclared transitive dependency, so `tsc` failed with
+`Cannot find module` until it was added to `package.json` explicitly
+(matching the already-resolved `9.15.1` from the lockfile).
+
+**Tests:** `tests/drive/change-detection.test.ts` - 5 cases: no-known-record
+→ new; strictly-newer `modifiedTime` → updated; identical `modifiedTime` →
+neither new nor updated (unchanged); a known ID absent from the current
+listing → deleted; a realistic mixed batch (one of each, plus one
+unchanged) classified correctly in a single call. `tests/drive/list-drive-files.test.ts`
+- 5 cases against a hand-built fake `drive_v3.Drive`: maps API entries to
+`DriveFileMetadata`; skips an entry missing a required field rather than
+including a partial record; follows `nextPageToken` across multiple pages
+and combines the results; scopes the query to the given folder ID and
+excludes trashed files; escapes a single quote in the folder ID. 10/10
+passing (first tests to exist in `drive-sync` at all - previously "no
+tests to run yet" per `05-progress.md`). `pnpm -r run typecheck` and
+`pnpm -r run build` pass clean across all 9 workspace packages.
+
+**Verified live** (real Google Drive API, real service account) - hit a
+real blocker first: the initial call returned `403 PERMISSION_DENIED`,
+"Google Drive API has not been used in project 11490227436... or it is
+disabled." Same handling as Cycles 11/12's account-level blockers: flagged
+to the user rather than enabling a GCP API unilaterally; the user enabled
+it in the console. After that, a standalone script against the real
+`drivesync@lens-and-sync.iam.gserviceaccount.com` service account and the
+real configured folder (`GOOGLE_DRIVE_FOLDER_IDS`) found 7 real files (all
+Google Docs - recipe test fixtures, coincidentally useful real input data
+for the extraction cycle next). Ran `detectChanges` against this real data
+four ways: vs. an empty known-set → all 7 correctly "new"; vs. an
+identical known-set (mapped 1:1 from the real listing) → zero new/updated/
+deleted; vs. a known-set with one file's `modifiedTime` set far in the
+past → exactly that one file "updated", the other 6 "new" (as expected,
+since only one was in the known-set at all); vs. a known-set with one
+extra ID that doesn't exist in Drive → exactly that one ID "deleted". All
+four matched the expected counts exactly.
+
+**Not done yet:** Pinecone API key setup (the other half of Milestone #1)
+- not started, that's Milestone #6 territory. No extraction (#3),
+chunking (#4), embeddings (#5), Pinecone writes (#6), dedup/versioning
+(#7), or Postgres sync-state persistence (#8) yet - `detectChanges` is
+pure comparison logic; nothing yet calls it with real `DriveFile` records
+from Postgres, since that model has no reader/writer in `drive-sync` at
+all today. No scheduling (#9) or retrieval endpoint (#10) - `routes/sync.ts`
+is still an empty stub.

@@ -16,7 +16,7 @@ const schema = z.object({
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number(),
 
   GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().email(),
-  GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().min(1),
+  GOOGLE_SERVICE_ACCOUNT_KEY_FILE: z.string().min(1),
   GOOGLE_DRIVE_FOLDER_IDS: commaSeparated,
 
   PINECONE_API_KEY: z.string().min(1),
