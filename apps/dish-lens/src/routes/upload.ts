@@ -8,10 +8,13 @@ import { config } from "../config.js";
 import { classifyDish, type DishClassification } from "../edge-cases/index.js";
 import { checkModeration } from "../moderation/index.js";
 import { lookupNutrition } from "../nutrition/index.js";
+import { normalizeImage } from "../preprocessing/image-normalize.js";
 import { anthropicClient } from "../recipe/client.js";
 import { generateRecipe } from "../recipe/index.js";
 import { redis } from "../session/redis-client.js";
 import { createSessionStore } from "../session/session-store.js";
+import { getSignedReadUrl, uploadNormalizedImage } from "../storage/index.js";
+import { uploadsBucket } from "../storage/gcs-client.js";
 import { assessUpload, type UploadAssessment } from "../upload/index.js";
 import { visionClient } from "../vision/client.js";
 import { analyzeImage } from "../vision/index.js";
@@ -116,6 +119,27 @@ uploadRouter.post(
         return;
       }
 
+      // Store the image only once it's cleared moderation and been
+      // confirmed as a real dish - never persist a photo that failed
+      // format/blur/moderation checks, and never store the raw upload
+      // as-is (re-encoded via normalizeImage() first: orientation-correct,
+      // EXIF/GPS stripped). Best-effort, like nutrition below: a storage
+      // hiccup shouldn't fail a request whose core recipe result doesn't
+      // depend on it.
+      let image: { objectKey: string; url: string } | null = null;
+      const normalized = await normalizeImage(req.file.buffer);
+      if (normalized.ok) {
+        try {
+          const stored = await uploadNormalizedImage(uploadsBucket, normalized.buffer, normalized.mimeType);
+          const url = await getSignedReadUrl(uploadsBucket, stored.objectKey, config.GCS_SIGNED_URL_EXPIRY_SECONDS);
+          image = { objectKey: stored.objectKey, url };
+        } catch (err) {
+          console.error(`Image storage failed for a classified "${classification.dishName}" photo - continuing without a stored image.`, err);
+        }
+      } else {
+        console.error(`Image normalization failed (${normalized.reason}) for a classified "${classification.dishName}" photo - continuing without a stored image.`);
+      }
+
       const recipeResult = await generateRecipe(anthropicClient, config.ANTHROPIC_MODEL, classification.dishName);
       if (!recipeResult.ok) {
         res.status(502).json({
@@ -147,7 +171,13 @@ uploadRouter.post(
       const session = await sessionStore.createSession(userId);
       await sessionStore.appendMessage(userId, session.sessionId, {
         role: "assistant",
-        content: JSON.stringify({ dishName: classification.dishName, confidence: classification.confidence, recipe, nutrition }),
+        content: JSON.stringify({
+          dishName: classification.dishName,
+          confidence: classification.confidence,
+          recipe,
+          nutrition,
+          imageObjectKey: image?.objectKey ?? null,
+        }),
       });
 
       res.status(200).json({
@@ -156,6 +186,7 @@ uploadRouter.post(
         dishName: classification.dishName,
         recipe,
         nutrition,
+        image,
         mimeType: assessment.mimeType,
         sizeBytes: assessment.sizeBytes,
         width: assessment.width,

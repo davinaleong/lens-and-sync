@@ -129,7 +129,3 @@ export async function assessUpload(
     height: dimensions.height,
   };
 }
-
-// TODO: multer/multipart wiring is done (see routes/upload.ts) but
-// pre-signed GCS upload URLs (random UUID object keys) are still not -
-// this still routes the raw binary through the API server.

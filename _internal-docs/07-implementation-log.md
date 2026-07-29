@@ -850,3 +850,78 @@ no `nutritionAvailable: false`-style flag distinguishing "no nutrition data
 returned" from "lookup failed," which a real iOS client would likely want
 to render differently. Save-chat (Cycle 8) still isn't wired to this flow
 - there's no endpoint yet that snapshots a live session into a `SavedChat`.
+
+---
+
+## 2026-07-29 — Cycle 15: DishLens GCS object storage
+
+**What:** `src/storage/index.ts` implements `uploadNormalizedImage(bucket,
+buffer, mimeType)` and `getSignedReadUrl(bucket, objectKey, expirySeconds)`
+- the remaining piece of Milestone #1/#2 and the last unchecked items in
+`01-security-checklist.md` §5. `src/storage/gcs-client.ts` holds the one
+real `Storage`/`Bucket` singleton (same pattern as `vision/client.ts` and
+`recipe/client.ts` - reuses the same service account already used for
+Vision, per `.env.example`'s existing comment). Same dependency-injection
+shape as every prior cycle: `bucket` is a parameter, not an import, so
+`uploadNormalizedImage`/`getSignedReadUrl` are unit-testable against a
+hand-built fake bucket.
+
+- Object keys are `${randomUUID()}.{jpg|png}` - never the client filename,
+  never derived from dish/user data.
+- `file.save()` is called with no `public`/`predefinedAcl` option, so
+  objects inherit the bucket's own (private) access - confirmed live below
+  that an unauthenticated fetch of the raw object URL gets `403`.
+- The only read path is `getSignedReadUrl` - a v4 signed URL with a
+  caller-supplied expiry (new `GCS_SIGNED_URL_EXPIRY_SECONDS` config,
+  default 1 hour).
+
+`routes/upload.ts` now calls `normalizeImage()` (Cycle 6 - finally has a
+caller) then `uploadNormalizedImage()` + `getSignedReadUrl()`, but **only
+after** moderation and dish classification both pass - a photo that fails
+format/blur/moderation/non-dish checks is never persisted. Storage is
+deliberately best-effort like nutrition (Cycle 14): a GCS hiccup or an
+undecodable-on-normalize edge case (the same HEVC-HEIC gap noted since
+Cycle 5/6) logs server-side and continues with `image: null` rather than
+failing a request whose core recipe result doesn't depend on it. The
+session message persisted to Redis stores the object key (not the signed
+URL itself, which would go stale before the session TTL); the HTTP
+response returns both the key and a freshly-generated signed URL.
+
+**Tests:** `tests/storage/gcs-storage.test.ts` - 4 cases against a
+hand-built fake `Bucket`: uploads under a UUID `.jpg` key with the right
+content-type/options; `.png` extension for PNG input and no key reuse
+across two calls; confirms no `public`/`predefinedAcl` option is ever
+passed to `save()`; `getSignedReadUrl` requests a v4 read-scoped URL with
+an expiry timestamp in the future. 72/72 tests passing across the app (68
+pre-existing + 4 here - `save-chat.test.ts`'s 4 cases still skip without a
+running local Postgres, unchanged from every prior cycle). `pnpm -r run
+typecheck` and `pnpm -r run build` pass clean across all 9 workspace
+packages.
+
+**Verified live** (real GCS bucket, real credentials): a standalone script
+uploaded a test object to the real `GCS_BUCKET_NAME` bucket, confirmed its
+content-type/size via `getMetadata()`, confirmed an unauthenticated fetch
+of the raw object URL returns `403` (not publicly readable), confirmed a
+v4 signed URL for the same object returns `200` with the correct byte
+count, then deleted the object - no leftover test data in the bucket.
+Separately, started the real compiled app (killed a stale process from an
+earlier session that was still holding port 4002 with pre-Cycle-15 code)
+and drove `POST /upload` with curl: no `Authorization` header returns
+`401` before any file processing; a plain-text file renamed as an upload
+returns `415 unrecognized-format`; a flat-gray synthetic JPEG returns `422
+too-blurry` - confirming the blur check still short-circuits before
+Vision, moderation, classification, *and* the new storage step, so a
+rejected photo never reaches GCS. `/health`'s `RateLimit-*` headers still
+present, unaffected. The app process was stopped afterward (confirmed
+nothing left listening on `:4002` besides harmless `TIME_WAIT` sockets).
+
+**Not done yet:** still no real dish-photo fixture to drive a `200`
+through the live HTTP route and confirm a real image actually lands in GCS
+via the full pipeline (same standing gap as Cycle 14, now one layer
+deeper). No lifecycle policy on the bucket (orphaned images from requests
+that succeed through storage but then fail recipe generation - a `502` -
+are never cleaned up, since there's no delete-on-failure or scheduled
+sweep). No `imageObjectKey` column on `SavedChat` - if a session is later
+saved (Cycle 8's `saveChat`, still unwired to this flow), the image
+reference only lives inside the JSONB message content, not as a queryable
+field.

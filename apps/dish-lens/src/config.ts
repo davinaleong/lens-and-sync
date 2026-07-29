@@ -23,6 +23,7 @@ const schema = z.object({
   NUTRITION_API_APP_KEY: z.string().min(1),
 
   GCS_BUCKET_NAME: z.string().min(1),
+  GCS_SIGNED_URL_EXPIRY_SECONDS: z.coerce.number().default(3600),
 
   REDIS_URL: z.string().url(),
   REDIS_SESSION_TTL_SECONDS: z.coerce.number(),
