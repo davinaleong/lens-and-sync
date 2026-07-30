@@ -1,5 +1,17 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // Turbo v2 defaults to envMode "strict", which silently strips every
+  // env var not explicitly declared (via globalEnv/task `env`) from each
+  // task's subprocess - including DATABASE_URL/REDIS_URL/etc set by CI or
+  // a local shell. Under strict mode, `turbo run test` would fail with
+  // "Environment variable not found: DATABASE_URL" regardless of what the
+  // caller's environment actually has set, since none of these app config
+  // vars were ever declared here. "loose" restores full env pass-through
+  // (Turbo v1's old default) - this project has no reproducibility need
+  // that strict mode buys, and enumerating every var across both apps'
+  // zod schemas here would just be a second place to keep in sync with
+  // config.ts every time a var is added.
+  "envMode": "loose",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

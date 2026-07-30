@@ -54,5 +54,6 @@ jobs:
       - run: pnpm run test
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lens_and_sync_test
+          REDIS_URL: redis://localhost:6379
 
       - run: pnpm run build

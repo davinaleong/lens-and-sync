@@ -7,30 +7,30 @@ DishLens is consumed by an iOS app — includes dedicated iOS-integration test c
 ## DriveSync — Testing Checklist
 
 **Unit tests**
-- [ ] Change detection: correctly identifies new/updated/deleted files given mock Drive API responses
-- [ ] Content hashing: same content → same hash; modified content → different hash
-- [ ] Chunking: correct chunk sizes/overlap, metadata (fileId, title, chunk index) attached correctly
-- [ ] Dedup logic: unchanged files skipped, only diffs re-embedded
-- [ ] Pinecone ID scheme: stable, collision-free IDs (`{fileId}-{chunkIndex}`), upserts don't duplicate
+- [x] Change detection: correctly identifies new/updated/deleted files given mock Drive API responses. `detectChanges()`, 5 cases (`07-implementation-log.md` Cycle 18), plus verified live against a real 7-file Drive folder covering all three branches.
+- [x] Content hashing: same content → same hash; modified content → different hash. `computeContentHash()`/`shouldReembedFile()`, 7 cases (Cycle 23), plus verified live that two independent real extractions of the same real Drive doc hash identically.
+- [x] Chunking: correct chunk sizes/overlap, metadata (fileId, title, chunk index) attached correctly. `chunkText()`, 9 cases (Cycle 20), plus verified live against all 7 real extracted Drive docs.
+- [x] Dedup logic: unchanged files skipped, only diffs re-embedded. Covered by `shouldReembedFile()`'s tests above plus `run-sync-once.test.ts`'s "skips re-embedding on a second run where the file's real content is unchanged" (Cycle 25), verified live via a real second sync run doing zero redundant work.
+- [x] Pinecone ID scheme: stable, collision-free IDs (`{fileId}-{chunkIndex}`), upserts don't duplicate. `vectorId()`, unit-tested and verified live via a real upsert/fetch round-trip (Cycle 22).
 
 **Integration tests**
-- [ ] Full sync run against a real (test) Drive folder — add/modify/delete a file, confirm Pinecone reflects it after sync
-- [ ] Extraction across file types: Google Docs, Sheets, PDFs (including scanned/OCR), Slides
-- [ ] Pinecone upsert/delete/query round-trip with real API calls (staging index)
-- [ ] Prisma migrations run cleanly against a fresh DB; `DriveFile` table reflects sync state accurately
-- [ ] Retrieval endpoint returns correct top-k chunks with accurate source attribution for a known query
+- [ ] Full sync run against a real (test) Drive folder — add/modify/delete a file, confirm Pinecone reflects it after sync. **Add/modify covered live** (Cycles 25-27: real new-file syncs, repeatedly, via the real BullMQ worker). **Delete not covered against a real Drive deletion** — `deleteVectorsForFile`'s deletion mechanism itself is real-verified (Cycle 23, fabricated file IDs) and `runSyncOnce` correctly handles `detectChanges`'s `deletedFileIds` output (unit-tested, Cycle 25), but no cycle has actually deleted one of the 7 real shared test-folder documents to observe a real end-to-end deletion sync, since that's a destructive action against shared test data outside this session's scope to take unprompted.
+- [ ] Extraction across file types: Google Docs, Sheets, PDFs (including scanned/OCR), Slides. **Google Docs real** (all 7 test files, Cycle 19). **Sheets/Slides**: implemented and unit-tested (Cycle 19) but no real file of either type exists in the test folder. **PDF**: real parsing verified against a real generated PDF (Cycle 19, not a real Drive-hosted PDF). **Scanned/OCR PDF**: detected but not implemented (see Milestone #3's note) — deliberately out of scope pending a real fixture and a dedicated OCR cycle.
+- [x] Pinecone upsert/delete/query round-trip with real API calls (staging index). No separate staging index exists — the real `drive-sync-dev` index has been used as the de facto test/staging index throughout (matches how DishLens's cycles used real dev credentials). Upsert (Cycle 22), delete (Cycle 23), and query (Cycle 26) each verified live against it, including full cleanup after each run.
+- [x] Prisma migrations run cleanly against a fresh DB; `DriveFile` table reflects sync state accurately. The migration itself was applied and verified in Cycle 17; the `DriveFile` table has been read/written correctly across every Cycle 24-27 live verification (real rows created, updated, and deleted matching real sync outcomes).
+- [x] Retrieval endpoint returns correct top-k chunks with accurate source attribution for a known query. Verified live through the real HTTP route: a real query for "How do I make banana pancakes?" correctly returned the real matching document as the top result with correct attribution (`07-implementation-log.md` Cycle 26).
 
 **Failure & resilience tests**
-- [ ] Drive API rate limit / 429 → retry with backoff, doesn't crash the sync job
-- [ ] Embedding API timeout/failure → job fails gracefully, doesn't leave partial/corrupt state, retriable on next run
-- [ ] Pinecone write failure mid-batch → no silent data loss, sync marked as failed/partial rather than "success"
-- [ ] Malformed/corrupted file in the folder (e.g. empty doc, unsupported format) → skipped with a logged warning, doesn't halt the whole sync
-- [ ] Concurrent sync runs (e.g. scheduled job overlaps a manual trigger) → locking prevents duplicate/conflicting writes
+- [ ] Drive API rate limit / 429 → retry with backoff, doesn't crash the sync job. **Not implemented** — `listDriveFiles`/`extractText` have no retry/backoff logic at all; only `generateEmbeddings` (OpenAI) has this. A real, standing gap, distinct from the embedding-retry item below.
+- [x] Embedding API timeout/failure → job fails gracefully, doesn't leave partial/corrupt state, retriable on next run. `generateEmbeddings` retries transient failures internally (Cycle 21, unit-tested incl. exponential backoff); if it still fails, `syncOneFile` returns a failure without persisting sync state for that file (Cycle 25), so the file is naturally retried as "new"/"updated" on the next run - no corrupt partial state, confirmed via the real partial-failure live check in Cycle 27.
+- [ ] Pinecone write failure mid-batch → no silent data loss, sync marked as failed/partial rather than "success". The "marked as failed, not silently successful" half is true and tested (`upsertChunkVectors` returning `ok: false` propagates to a per-file `failures` entry, Cycle 25/27). The "no data loss" half has a real, undocumented-until-now edge case: if an earlier batch within a multi-batch upsert for one file succeeds and a later batch fails, the earlier batch's vectors are already real and written, but no sync-state record gets persisted (since the whole `syncOneFile` call reports failure) - a full re-sync on the next run would call `deleteVectorsForFile` before re-upserting, which is self-healing, but this exact scenario has not been deliberately tested.
+- [x] Malformed/corrupted file in the folder (e.g. empty doc, unsupported format) → skipped with a logged warning, doesn't halt the whole sync. `run-sync-once.test.ts`'s "records a per-file failure without aborting the rest of the run" (Cycle 25) plus a real live check with 7 real files all failing extraction simultaneously, each individually logged, the run still completing (Cycle 27).
+- [x] Concurrent sync runs (e.g. scheduled job overlaps a manual trigger) → locking prevents duplicate/conflicting writes. `jobs/lock.ts`, unit-tested against real Redis (5 cases, Cycle 25) and verified live: a manually-held lock caused a real triggered job to skip rather than run concurrently.
 
 **Scheduling & observability**
-- [ ] Cron/queue trigger fires on schedule reliably
-- [ ] Sync status endpoint reflects last run time, success/failure, files processed
-- [ ] Alerting fires on repeated sync failures
+- [ ] Cron/queue trigger fires on schedule reliably. `scheduleSyncJob`'s repeatable-job *registration* is confirmed live against real Redis (doesn't throw, Cycles 25-27), but no cycle has actually waited out a real cron interval to observe the job self-firing on schedule - impractical to verify without waiting the full interval in real time.
+- [x] Sync status endpoint reflects last run time, success/failure, files processed. Verified live across all three states - no sync yet, a real success, a real total failure, and a real partial failure - each via a real `GET /sync/status` call (`07-implementation-log.md` Cycle 27).
+- [ ] Alerting fires on repeated sync failures. The log-based signal a real alerting layer would consume exists (`sync-run-had-failures`, Cycle 27), but there's no actual alert *delivery* (no PagerDuty/Sentry/etc. configured, per `06-toolchain-decisions.md`'s deferred list) and no "N consecutive failures" detection logic - only per-run failure logging.
 
 ---
 

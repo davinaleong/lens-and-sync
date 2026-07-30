@@ -2053,3 +2053,92 @@ kept) - a real audit trail of past runs would need Postgres, not the
 single-key Redis approach used here. No automatic retry of failed
 individual files within a run (a failed file just waits for the next
 scheduled sync to retry it via the normal new/updated detection path).
+
+---
+
+## 2026-07-30 — Cycle 28: CI/CD fixes + testing-checklist review
+
+**What:** Milestone #12's remaining piece. Rather than assume the
+existing `.github/workflows/ci.yml` worked because it *read* correctly,
+simulated its exact steps locally with only the env vars CI actually sets
+- and found two real, previously-undiscovered bugs that meant CI had
+almost certainly never passed on this repo (`05-progress.md`'s original
+scaffolding note already flagged CI as "not yet run on a real PR"; this
+cycle is the first time it's actually been exercised end-to-end).
+
+1. **Turbo v2 defaults to `envMode: "strict"`.** Under strict mode, Turbo
+   silently strips every environment variable not explicitly declared via
+   `globalEnv`/a task's `env` field from every task's subprocess -
+   including `DATABASE_URL`, regardless of what the calling shell (or CI's
+   `env:` block) actually has set. Reproduced directly: `env -i ...
+   DATABASE_URL=... npx turbo run test` still failed with "Environment
+   variable not found: DATABASE_URL" inside Prisma, while the exact same
+   command run via `pnpm --filter drive-sync run test` (bypassing Turbo
+   entirely) passed. Fixed by adding `"envMode": "loose"` to `turbo.json`
+   - full env pass-through, matching Turbo v1's old default and what this
+   project actually needs (no reproducibility requirement that strict mode
+   buys, and enumerating every var across two apps' `zod` schemas in
+   `globalEnv` would just be a second place to keep in sync with
+   `config.ts` every time a var is added).
+2. **`eslint` was never installed.** Both apps' `package.json` define
+   `"lint": "eslint src"`, but `eslint` doesn't appear as a dependency
+   anywhere in the repo, and no ESLint config file exists at all -
+   `pnpm run lint` fails immediately with `'eslint' is not recognized`,
+   reproduced with a plain `pnpm run lint` in a normal shell, no env
+   manipulation needed. Added `eslint`, `@eslint/js`, and `typescript-eslint`
+   as root devDependencies (shared across the workspace, matching how
+   `turbo`/`typescript` are already root-level) plus a single root
+   `eslint.config.js` (flat config, `typescript-eslint`'s recommended
+   rules, `no-unused-vars` set to warn with an `^_` prefix escape hatch
+   for deliberately-unused bindings like an Express error handler's unused
+   `_req`). Also added `"type": "module"` to the root `package.json` -
+   the flat config file's ESM syntax otherwise triggers a Node.js runtime
+   reparse warning on every lint run.
+
+**Verified live** (the actual CI sequence, run locally with only the
+env vars `ci.yml` sets - not a partial spot-check): `pnpm run lint`
+(0 errors across all 8 workspace packages, confirmed the setup actually
+*works*, not just installs, by deliberately introducing a real unused-
+variable violation in a throwaway file and confirming ESLint caught it
+before removing the file) → `pnpm run typecheck` (14/14 packages) →
+`pnpm run test` (12/12 packages, 160 total tests - dish-lens's 72 +
+drive-sync's 88, only `DATABASE_URL` and `REDIS_URL` set, matching
+`ci.yml`'s exact `test` step) → `pnpm run build` (8/8 packages). All four
+steps pass clean in the same order CI runs them. `ci.yml` itself also
+gained an explicit `REDIS_URL` in the `test` step's `env:` block -
+previously relied on an unstated coincidence (drive-sync's Redis-backed
+tests default to `redis://localhost:6379` when unset, which happens to
+match the CI Redis service container's exposed port, but relying on an
+implicit default matching an implicit port mapping isn't something to
+leave undocumented). No `gh` CLI is available in this environment to
+trigger and watch a real GitHub Actions run directly, so this is the
+closest verification available short of the next real push actually
+running the workflow.
+
+**Testing checklist review (`04-testing-checklist.md`):** went through
+every DriveSync item individually against what was *actually* done across
+Cycles 18-27, rather than blanket-checking the section. Result: all 5 unit
+test items are done and real-verified. Of 5 integration test items, 3 are
+done, and 2 are honestly partial - a real Drive-side file *deletion* was
+never exercised (deleting one of the 7 shared real test-folder documents
+is a destructive action on shared test data outside this session's scope
+to take unprompted) and Sheets/Slides/scanned-PDF extraction remains
+unit-tested-only for lack of real fixtures of those types. Of 5 failure/
+resilience items, 3 are done; Drive API rate-limit retry/backoff was
+never implemented at all (a real, previously-undocumented gap - only
+OpenAI's embedding calls have retry logic), and a genuine mid-batch-
+Pinecone-write-failure edge case (partial vectors written, no sync-state
+persisted, self-healing on next run but never deliberately tested) is
+now documented rather than silently assumed covered. Of 3 scheduling/
+observability items, 1 (status endpoint) is done; cron self-firing over
+real wall-clock time and actual alert *delivery* (vs. the log signal that
+exists) remain open.
+
+**Not done yet:** Drive API retry/backoff (a real gap, now documented
+rather than assumed). Real Sheets/Slides/PDF/scanned-PDF fixtures. A real
+end-to-end Drive-deletion sync test. Alert delivery integration (Sentry/
+PagerDuty/etc. - still on `06-toolchain-decisions.md`'s deferred list).
+No staging environment or deploy pipeline beyond CI - deploying either
+app to a real host is entirely unstarted. No `gh`-CLI-verified real GitHub
+Actions run yet - the next push to `main` will be the first real test of
+the fixed workflow.
