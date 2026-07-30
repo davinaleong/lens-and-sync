@@ -1750,3 +1750,121 @@ neither was running beforehand) were stopped afterward.
 a manual verification script - that orchestration, plus BullMQ scheduling
 and job locking, is Milestone #9, still unstarted. The retrieval endpoint
 (#10) also remains unstarted.
+
+---
+
+## 2026-07-30 — Cycle 25: DriveSync scheduling, orchestration, and job locking
+
+**What:** Milestone #9, plus the piece every prior cycle deferred: an
+actual caller that ties Milestones #2-#8 into one real sync run.
+
+- **`jobs/index.ts`'s `runSyncOnce(deps)`** - the job body. Lists every
+  configured Drive folder, runs `detectChanges` against Postgres-persisted
+  state (Cycle 24), then for each new/updated file: extract → content-hash
+  dedup (skip re-embedding, but still refresh the Postgres record so
+  `detectChanges` stops re-flagging it every future run) → chunk → embed →
+  **delete this file's existing vectors, then upsert its new ones** (not
+  upsert alone - guards against orphaned vectors if a re-synced file has
+  *fewer* chunks than its last sync) → persist sync state. For each
+  deleted file: delete its vectors, then its sync-state row. A single
+  file's failure (extraction, embedding, or upsert) is recorded in a
+  `failures` array and doesn't abort the rest of the run - one bad file
+  shouldn't sink an otherwise-successful sync of everything else.
+- **`jobs/lock.ts`'s `acquireSyncLock`/`releaseSyncLock`** - a Redis
+  `SET key token PX ttl NX` mutex with Lua compare-and-delete release (not
+  a bare `DEL`, which could release a *different* run's lock if this one's
+  TTL already expired). `createSyncWorker` wraps every job in this lock on
+  top of the `Worker`'s own `concurrency: 1` - concurrency alone only
+  serializes jobs pulled from the *same* queue by the *same* worker; the
+  lock is what actually stops a manually-triggered run from overlapping a
+  scheduled one, which is what `01-security-checklist.md` §4's "sync job
+  locking" item is actually asking for. A run that can't acquire the lock
+  is logged and skipped, not treated as a failure - lock contention is an
+  expected, benign outcome of overlap.
+- **`createSyncQueue`/`scheduleSyncJob`** - thin BullMQ wrappers; the
+  scheduled job uses a fixed `jobId` so re-registering it (e.g. on every
+  app restart) is idempotent rather than accumulating duplicate
+  repeatable jobs.
+- **`src/index.ts` wiring** - new `src/drive/client.ts` and
+  `src/embeddings/client.ts` hold the real `Drive`/`OpenAI` singletons
+  (mirroring `vector-store/pinecone-client.ts`'s existing pattern). BullMQ
+  gets its own dedicated `ioredis` connection (`maxRetriesPerRequest:
+  null`, required by BullMQ) rather than sharing the app's existing
+  rate-limiting `redis` - sharing one connection's blocking commands
+  across a rate-limiter and a Worker's consumption loop would contend with
+  each other. The lock itself only issues non-blocking `SET`/`EVAL`
+  commands, so it safely reuses the existing shared `redis` instead of
+  needing a third connection.
+
+**Tests:** `tests/jobs/lock.test.ts` - 5 cases against a real local Redis
+(locking behavior needs real TTL/atomicity, not a mock): acquires when
+free; a second acquire attempt while held returns `null`; a new acquire
+succeeds after the holder releases; the lock expires on its own after its
+TTL with no explicit release; a forged token can't release a lock it
+doesn't own (compare-and-delete safety, confirmed the real lock survives
+a fake release attempt). `tests/jobs/run-sync-once.test.ts` - 4 cases
+against a real local Postgres (needed since `sync-state/index.ts`
+functions aren't dependency-injected, following this codebase's existing
+Prisma-module convention) with faked Drive/OpenAI/Pinecone clients: a
+brand-new file syncs end-to-end and its `chunkIds` persist correctly;
+re-running with the same content but a newer `modifiedTime` (a simulated
+metadata-only edit) skips re-embedding entirely (confirmed the embedding
+mock's call count doesn't increase) while still updating the stored
+`modifiedTime`; a file that's disappeared from Drive gets its (empty, in
+this case) vector search and its sync-state row both cleaned up; a
+failing file is recorded in `failures` without preventing a second,
+healthy file in the same run from succeeding. 76/76 tests passing across
+the app (67 pre-existing + 9 here). `pnpm -r run typecheck` and `pnpm -r
+run build` pass clean across all 9 workspace packages.
+
+**Verified live** (real Drive, real OpenAI, real Pinecone, real Postgres,
+real Redis, a real BullMQ `Worker` - the least-mocked verification pass
+yet): a standalone script wired up real `createSyncQueue`/`createSyncWorker`
+against a scratch queue name, registered a real repeatable job via
+`scheduleSyncJob` (confirmed it doesn't throw against real Redis),
+then drove three real triggered runs:
+
+1. **First trigger** - a real job ran the real full pipeline against all 7
+   real Drive files (none previously known to Postgres): `{ newFiles: 7,
+   failures: [] }`. This is the first time in the whole DriveSync build
+   that a single triggered action exercises every layer (#2 through #8)
+   in the order and shape the actual production code path will use, not a
+   script manually calling each function in sequence.
+2. **Lock contention** - manually acquired the lock via `acquireSyncLock`
+   before triggering a second job; the worker's `completed` event fired
+   with an `undefined` result and the log line
+   `{"event":"sync-skipped-locked",...}` - confirmed the real worker
+   actually respects the lock rather than running through it.
+3. **Third trigger**, after releasing the lock - since nothing on the real
+   Drive folder had actually changed between runs, `detectChanges` found
+   zero new/updated/deleted files and did no work at all (`{ newFiles: 0,
+   updatedFiles: 0, ... }`) - an even stronger guarantee than "re-embed is
+   skipped": the real persisted `modifiedTime` correctly prevented any
+   re-processing whatsoever on an unchanged real folder.
+
+Caught one real bug in the *verification script itself* (not the app
+code) before it could mislead the result: the script's own scratch Redis
+connection for BullMQ was missing `maxRetriesPerRequest: null`, which
+BullMQ refuses to start a `Worker` without - a reminder that this
+constraint is easy to get right in application code and easy to forget
+in ad hoc scripts.
+
+All test data was cleaned up afterward: every synced file's vectors
+(`deleteVectorsForFile`) and sync-state row (`deleteSyncState`) were
+removed, the scratch queue was `obliterate`d, and a final check confirmed
+`0` Postgres rows and `0` Pinecone records - no leftover state in shared
+infrastructure. The local Redis (noted as running an old 5.0.14.1 -
+below BullMQ's recommended 6.2.0 minimum, a real warning surfaced during
+this verification but not something to fix in this environment) and
+Postgres, both started fresh for this cycle, were stopped afterward.
+
+**Not done yet:** the retrieval endpoint (#10, `routes/sync.ts`'s query
+API) and observability (#11, sync logs/failure alerts/last-sync-status
+endpoint - `runSyncOnce`'s `SyncRunResult` is logged but not persisted or
+exposed via any endpoint) remain unstarted. No `/sync` route triggers a
+manual sync on demand - the only way to run one today is the internal
+`runSyncOnce`/BullMQ wiring exercised by this cycle's verification
+script. Multi-folder support (`folderIds: string[]`) is implemented and
+typed but only ever exercised live against the one real configured
+folder - no second real test folder exists to confirm true multi-folder
+aggregation.

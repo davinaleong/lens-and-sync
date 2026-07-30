@@ -41,6 +41,25 @@ export async function getKnownContentHash(driveFileId: string): Promise<string |
   return row?.contentHash ?? null;
 }
 
+export interface KnownSyncState {
+  contentHash: string;
+  chunkIds: string[];
+}
+
+/**
+ * Like `getKnownContentHash`, but also returns the previously-stored
+ * `chunkIds` - needed by the sync orchestration (`jobs/index.ts`) when a
+ * file's content hash is unchanged: it still needs to re-persist the
+ * record (refreshing `driveModifiedTime`/`lastSyncedAt` so `detectChanges`
+ * stops re-flagging it as "updated" every future run) without touching
+ * Pinecone, which means it needs the *existing* `chunkIds` rather than
+ * recomputing them from a re-embed it's deliberately skipping.
+ */
+export async function getSyncStateRecord(driveFileId: string): Promise<KnownSyncState | null> {
+  const row = await prisma.driveFile.findUnique({ where: { driveFileId }, select: { contentHash: true, chunkIds: true } });
+  return row ? { contentHash: row.contentHash, chunkIds: row.chunkIds } : null;
+}
+
 /**
  * Records (or updates) a file's sync state after a successful
  * extract-chunk-embed-upsert pass. `lastSyncedAt` is only bumped

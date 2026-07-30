@@ -3,11 +3,16 @@ import cors from "cors";
 import express from "express";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
+import { Redis } from "ioredis";
 import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { config } from "./config.js";
+import { driveClient } from "./drive/client.js";
+import { openaiClient } from "./embeddings/client.js";
+import { createSyncQueue, createSyncWorker, runSyncOnce, scheduleSyncJob } from "./jobs/index.js";
 import { logger } from "./logger.js";
 import { redis } from "./redis-client.js";
 import { syncRouter } from "./routes/sync.js";
+import { vectorIndex } from "./vector-store/pinecone-client.js";
 
 const app = express();
 
@@ -50,6 +55,35 @@ app.use("/sync", syncRouter);
 app.use(notFoundHandler());
 app.use(createFallbackErrorHandler(logger));
 
+// BullMQ needs its own dedicated Redis connection for the Worker's
+// blocking consumption loop - sharing the app's `redis` (already used for
+// rate-limiting) would let the two contend over the same connection's
+// blocking commands. `maxRetriesPerRequest: null` is required by BullMQ
+// for the same reason `redis-client.ts`'s shared instance already sets it.
+const bullConnection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
+
+const syncQueue = createSyncQueue(bullConnection, config.SYNC_QUEUE_NAME);
+await scheduleSyncJob(syncQueue, config.SYNC_CRON_SCHEDULE);
+
+// The lock itself (`jobs/lock.ts`) only ever issues non-blocking SET/EVAL
+// commands, so it's safe to share the app's existing `redis` connection
+// rather than needing a third dedicated one.
+createSyncWorker(
+  bullConnection,
+  config.SYNC_QUEUE_NAME,
+  redis,
+  () =>
+    runSyncOnce({
+      drive: driveClient,
+      folderIds: config.GOOGLE_DRIVE_FOLDER_IDS,
+      embeddingClient: openaiClient,
+      embeddingModel: config.EMBEDDING_MODEL,
+      embeddingDimensions: config.EMBEDDING_DIMENSIONS,
+      vectorIndex,
+    }),
+  logger,
+);
+
 app.listen(config.PORT, () => {
-  logger.info({ port: config.PORT }, "drive-sync listening");
+  logger.info({ port: config.PORT, cron: config.SYNC_CRON_SCHEDULE }, "drive-sync listening");
 });
