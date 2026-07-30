@@ -28,7 +28,7 @@ export async function saveChat(params: {
     data: {
       userId: params.userId,
       dishName: params.dishName,
-      messages: params.messages as unknown as Prisma.InputJsonValue,
+      messages: params.messages as unknown as Prisma.JsonValue,
     },
   });
 
