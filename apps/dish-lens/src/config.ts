@@ -13,7 +13,8 @@ const schema = z.object({
   JWT_REFRESH_TTL: z.string().min(1),
 
   GOOGLE_CLOUD_PROJECT_ID: z.string().min(1),
-  GOOGLE_CLOUD_CREDENTIALS_JSON: z.string().min(1).transform((s) => JSON.parse(s) as Record<string, unknown>),
+  // Docker env_file keeps surrounding quotes; dotenv strips them — normalise both.
+  GOOGLE_CLOUD_CREDENTIALS_JSON: z.string().min(1).transform((s) => JSON.parse(s.trim().replace(/^(["'])[\s\S]*\1$/, (m, q) => m.slice(1, -1))) as Record<string, unknown>),
 
   ANTHROPIC_API_KEY: z.string().min(1),
   ANTHROPIC_MODEL: z.string().min(1),

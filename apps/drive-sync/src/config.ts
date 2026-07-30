@@ -15,7 +15,8 @@ const schema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number(),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number(),
 
-  GOOGLE_CLOUD_CREDENTIALS_JSON: z.string().min(1).transform((s) => JSON.parse(s) as Record<string, unknown>),
+  // Docker env_file keeps surrounding quotes; dotenv strips them — normalise both.
+  GOOGLE_CLOUD_CREDENTIALS_JSON: z.string().min(1).transform((s) => JSON.parse(s.trim().replace(/^(["'])[\s\S]*\1$/, (m, q) => m.slice(1, -1))) as Record<string, unknown>),
   GOOGLE_DRIVE_FOLDER_IDS: commaSeparated,
 
   PINECONE_API_KEY: z.string().min(1),
