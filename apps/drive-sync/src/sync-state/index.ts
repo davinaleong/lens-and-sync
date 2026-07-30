@@ -27,7 +27,7 @@ export interface SyncStateInput {
  */
 export async function listKnownFiles(): Promise<KnownFileRecord[]> {
   const rows = await prisma.driveFile.findMany({ select: { driveFileId: true, driveModifiedTime: true } });
-  return rows.map((row) => ({ driveFileId: row.driveFileId, driveModifiedTime: row.driveModifiedTime.toISOString() }));
+  return rows.map((row: { driveFileId: string; driveModifiedTime: Date }) => ({ driveFileId: row.driveFileId, driveModifiedTime: row.driveModifiedTime.toISOString() }));
 }
 
 /**
