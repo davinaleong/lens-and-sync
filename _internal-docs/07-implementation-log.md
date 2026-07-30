@@ -1868,3 +1868,82 @@ script. Multi-folder support (`folderIds: string[]`) is implemented and
 typed but only ever exercised live against the one real configured
 folder - no second real test folder exists to confirm true multi-folder
 aggregation.
+
+---
+
+## 2026-07-30 — Cycle 26: DriveSync retrieval endpoint
+
+**What:** Milestone #10. `src/retrieval/index.ts`'s `retrieveChunks(embeddingClient,
+model, vectorIndex, query, options)` embeds the plain-language `query`
+(reusing `generateEmbeddings` from Cycle 21 as a one-item batch, so the
+query is embedded with the exact same model/dimension configuration as
+every stored chunk - required for the similarity comparison to mean
+anything), queries Pinecone for the top-k most similar vectors, and maps
+each match to `fileId`/`title`/`chunkIndex`/`sourceUrl`/`section`/`score`.
+
+**Deliberately never returns the chunk's actual text.** This isn't an
+oversight - it's the direct consequence of Cycle 22's security decision
+that Pinecone metadata never stores raw chunk content, only IDs/titles/
+retrieval-relevant fields. A "top-k relevant chunks" endpoint built on top
+of that store can only ever answer "*where* is the relevant content," not
+"*here* is the relevant content" - a caller that needs the actual passage
+text has to follow `sourceUrl` back to the real Drive document (through
+whatever access control governs that document) rather than this service
+ever holding a second copy of the raw text outside the sync pipeline's
+own transient processing. Documented explicitly in the module so this
+reads as an intentional architectural boundary, not a bug to "fix" later.
+
+Live route: `POST /sync/query` in `routes/sync.ts`, gated by `requireAuth`
+(same shared JWT scheme as every other live route in this project - a
+Drive-synced knowledge base isn't public data) and a `zod`-validated body
+(`query`: non-empty string, max 2000 chars; optional `topK`: 1-20,
+default 5).
+
+**Not scoped per-user/per-folder** - this project syncs a single shared
+Drive folder into a single shared Pinecone namespace (a single-tenant
+design established since Cycle 22), so any authenticated user can query
+all synced content today. Documented as the deliberate current trust
+model in `01-security-checklist.md` §1, not a gap - the same boundary
+DishLens's own shared services already assume.
+
+**Tests:** `tests/retrieval/retrieve-chunks.test.ts` - 6 cases against
+hand-built fake embedding/index clients: the query text is embedded and
+the resulting vector passed through to the index query; `topK` defaults
+to 5 and a custom value passes through correctly; a match's metadata maps
+to exactly the expected source-attribution fields (explicitly asserted
+`"text"` is never a key on the returned chunk - a regression test against
+ever accidentally leaking chunk content); an embedding failure returns
+`embedding-failed` *without* ever calling the vector index (no wasted
+Pinecone call for a query that can't be embedded); a rejected index query
+returns `query-failed` rather than throwing; `embeddingDimensions` passes
+through to the embedding call. 82/82 tests passing across the app (76
+pre-existing + 6 here). `pnpm -r run typecheck` and `pnpm -r run build`
+pass clean across all 9 workspace packages.
+
+**Verified live end-to-end** (real Drive, real OpenAI, real Pinecone, real
+running app - no mocks): re-ran a real sync (via `runSyncOnce`, same as
+Cycle 25) to seed all 7 real Drive docs' real vectors back into Pinecone,
+started the real compiled app, signed a real JWT, and drove `POST
+/sync/query` with curl: no `Authorization` header → `401` before the
+route body ever runs; an empty `query` string → `400
+invalid-request`; a real query "How do I make banana pancakes?" with
+`topK: 3` → the real "TEST: Banana Pancakes" document as the top match
+(score `0.714`, matching Cycle 22's earlier live similarity check almost
+exactly) with correct `sourceUrl`/`title`/`chunkIndex`, followed by two
+lower-scoring unrelated documents - the same real relevance signal
+proven end-to-end through the actual HTTP route this time, not just a
+standalone script calling the module directly. Also confirmed the app's
+own scheduled cron registration (`scheduleSyncJob`, Cycle 25) still runs
+cleanly at boot against the real Redis. All 7 seeded files' vectors and
+sync-state rows were deleted afterward, confirmed via a real
+`describeIndexStats()` (0 records) and a real `driveFile.count()` (0
+rows) - no leftover test data. Postgres and Redis (both started fresh for
+this cycle) were stopped afterward.
+
+**Not done yet:** observability (#11 - sync logs/failure alerts/
+last-sync-status endpoint; `runSyncOnce`'s result is logged via
+`shared-logger` but never persisted or exposed through any endpoint) and
+the full testing/deploy checklist (#12) remain. No pagination or
+result-count limit beyond `topK` itself. No caching of repeated identical
+queries (each call re-embeds the prompt and re-queries Pinecone, even for
+an identical question asked twice in a row).
