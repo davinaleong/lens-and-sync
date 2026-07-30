@@ -11,10 +11,10 @@ import type { JWT } from "google-auth-library";
  * restriction is enforced separately by only ever querying the
  * configured `GOOGLE_DRIVE_FOLDER_IDS`, see `drive/index.ts`).
  */
-export function createDriveAuthClient(email: string, keyFile: string): JWT {
+export function createDriveAuthClient(credentials: Record<string, unknown>): JWT {
   return new google.auth.JWT({
-    email,
-    keyFile,
+    email: credentials.client_email as string,
+    key: credentials.private_key as string,
     scopes: ["https://www.googleapis.com/auth/drive.readonly"],
   });
 }
