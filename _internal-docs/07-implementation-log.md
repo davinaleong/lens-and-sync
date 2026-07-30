@@ -1947,3 +1947,109 @@ the full testing/deploy checklist (#12) remain. No pagination or
 result-count limit beyond `topK` itself. No caching of repeated identical
 queries (each call re-embeds the prompt and re-queries Pinecone, even for
 an identical question asked twice in a row).
+
+---
+
+## 2026-07-30 — Cycle 27: DriveSync observability
+
+**What:** Milestone #11, its three named pieces:
+
+- **Sync logs.** `runSyncOnce`/`syncOneFile` gained an optional `logger`
+  parameter (`SyncDependencies.logger`, same optional-logger shape as
+  `shared-auth`'s `requireAuth`) and now emit a structured event at every
+  meaningful per-file outcome: `sync-file-synced` (with `chunkCount`),
+  `sync-file-skipped-unchanged` (content-hash dedup, Cycle 23), `sync-file-deleted`,
+  and `sync-file-failed` (tagged with which `stage` failed - `extract`/
+  `embed`/`delete-old-vectors`/`upsert`/`delete`). Previously the only
+  logging was `createSyncWorker`'s single end-of-run summary (Cycle 25) -
+  this is the difference between "a sync ran and here's the aggregate
+  count" and "here's exactly what happened to each file," which is what
+  "sync logs" actually implies for debugging a specific file that didn't
+  sync as expected.
+- **Failure alerts.** A distinct `sync-run-had-failures` warning-level log
+  line fires whenever a run completes with any non-empty `failures` array
+  - separate from the always-emitted `sync-completed` info line, so a log-
+  based alert rule can watch for this one event specifically rather than
+  parsing every completion for a non-empty array. No third-party alerting
+  service (PagerDuty, Sentry) is wired up - none is configured per
+  `06-toolchain-decisions.md`'s "still generic/deferred" list - so this is
+  the log-based signal an external alerting layer would consume, matching
+  how `01-security-checklist.md` §11's "log security-relevant events" was
+  already implemented for dish-lens (Cycle 16): structured logs are the
+  mechanism, not a delivery integration.
+- **Last-sync-status endpoint.** New `jobs/status.ts` (`writeSyncStatus`/
+  `readSyncStatus`) persists the single most recent run's outcome
+  (`startedAt`, `finishedAt`, `ok`, `result` or `error`) to one Redis key
+  - deliberately not a new Postgres table/migration for what's one small,
+  constantly-overwritten JSON blob and a live-status check rather than a
+  history/audit log, matching how this codebase already uses Redis for
+  other small coordination state (locks, rate limits, sessions) instead of
+  Postgres. `createSyncWorker` writes this status after every run,
+  success or failure, reusing the existing `lockRedis` connection (both
+  are non-blocking `SET`/`GET`/`EVAL` commands, unlike the Worker's own
+  blocking consumption loop) rather than adding a third Redis connection.
+  Exposed via a new `GET /sync/status` route (`requireAuth`-gated, same as
+  every other live route) that just reads the key back.
+
+**Tests:** `tests/jobs/status.test.ts` - 4 cases against real local
+Redis: returns `null` before anything's been written; a written status
+round-trips exactly; a second write overwrites the first rather than
+accumulating history; a failure status with per-file failures round-trips
+correctly. `tests/jobs/run-sync-once.test.ts` gained 2 cases: a supplied
+fake logger receives `sync-file-synced` for a successful file; a fake
+logger receives `sync-file-failed` (with `stage: "extract"`) for a file
+that fails to extract. 88/88 tests passing across the app (82 pre-existing
++ 6 here). `pnpm -r run typecheck` and `pnpm -r run build` pass clean
+across all 9 workspace packages.
+
+**Verified live** (real Drive, real OpenAI, real Pinecone, real Postgres,
+real Redis, the real running app - across all three run outcomes, not
+just the happy path): started the real compiled app (confirmed
+`scheduleSyncJob` still registers cleanly at boot) and signed a real JWT.
+
+1. `GET /sync/status` before any sync had run → `{"status":null}`,
+   confirming the "nothing yet" case is a clean response, not an error.
+2. Triggered a real full sync via a standalone script (same
+   `createSyncQueue`/`createSyncWorker` pattern as Cycles 25/26, a scratch
+   queue name but the *same* real Redis, so it writes to the same global
+   status key the running app reads) - all 7 real files produced real
+   `sync-file-synced` log lines, followed by `sync-completed`.
+   `GET /sync/status` on the *separately running app process* immediately
+   reflected this run's exact result - proof the status mechanism works
+   across process boundaries via shared Redis, not just within one
+   process's memory.
+3. Triggered a real **total** failure (a fake Drive client whose
+   `files.list` always throws, so `runSyncOnce` itself throws before
+   processing any file) - the worker logged a real error with the actual
+   stack trace, and `GET /sync/status` correctly showed `ok: false`,
+   `result: null`, `error: "simulated total failure"`.
+4. Triggered a real **partial** failure (cleared the 7 files' Postgres
+   records first so they'd be reprocessed as "new," then a real Drive
+   listing paired with an `export`/`get` that always throws) - all 7 files
+   individually logged `sync-file-failed` (`stage: "extract"`), the run
+   still completed (didn't throw - `ok: true` at the worker/status level),
+   AND the distinct `sync-run-had-failures` warning fired with all 7
+   failures attached. `GET /sync/status` correctly showed `ok: true` with
+   `result.failures` populated - the meaningful distinction between "the
+   sync mechanism itself broke" (case 3) and "the sync ran but some files
+   didn't make it" (case 4), which is exactly the distinction a real
+   on-call engineer would need this endpoint to make.
+
+All real data was cleaned up afterward: the successful run's 7 real
+Pinecone vectors were deleted by their known file IDs (a gap in the first
+cleanup pass - `listKnownFiles()` found nothing because case 4's Postgres
+clear had already emptied the table, catching that the naive
+"clean up whatever's in Postgres" approach doesn't cover vectors from a
+run whose Postgres records were separately cleared for a later test - real
+IDs had to be deleted directly instead), confirmed via a final real
+`describeIndexStats()` (0 records). The `drivesync:last-sync-status` Redis
+key was also cleared. Postgres and Redis (both started fresh for this
+cycle) were stopped afterward.
+
+**Not done yet:** the full testing/deploy checklist (#12 - broader unit/
+integration test coverage review, CI/CD, staging environment) is the last
+remaining DriveSync milestone. No sync *history* (only the latest run is
+kept) - a real audit trail of past runs would need Postgres, not the
+single-key Redis approach used here. No automatic retry of failed
+individual files within a run (a failed file just waits for the next
+scheduled sync to retry it via the normal new/updated detection path).

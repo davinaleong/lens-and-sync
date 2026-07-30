@@ -132,4 +132,27 @@ describe("runSyncOnce", () => {
     expect(await prisma.driveFile.findUnique({ where: { driveFileId: okFile.id } })).not.toBeNull();
     expect(await prisma.driveFile.findUnique({ where: { driveFileId: failingFile.id } })).toBeNull();
   });
+
+  it("logs per-file sync events (Milestone #11) when a logger is supplied, and stays silent when it isn't", async () => {
+    const list = vi.fn().mockResolvedValue({ data: { files: [driveFile()] } });
+    const fakeLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    await runSyncOnce(baseDeps({ drive: fakeDrive({ list }), logger: fakeLogger as never }));
+
+    expect(fakeLogger.info).toHaveBeenCalledWith(expect.objectContaining({ event: "sync-file-synced", fileId: TEST_FILE_ID }), expect.any(String));
+  });
+
+  it("logs a failure event for a file that fails to extract", async () => {
+    const failingFile = driveFile({ id: "test-job-file-log-fail" });
+    const list = vi.fn().mockResolvedValue({ data: { files: [failingFile] } });
+    const exportFn = vi.fn().mockRejectedValue(new Error("simulated failure"));
+    const fakeLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    await runSyncOnce(baseDeps({ drive: fakeDrive({ list, export: exportFn }), logger: fakeLogger as never }));
+
+    expect(fakeLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "sync-file-failed", fileId: failingFile.id, stage: "extract" }),
+      expect.any(String),
+    );
+  });
 });

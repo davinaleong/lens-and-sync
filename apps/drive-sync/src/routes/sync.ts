@@ -4,7 +4,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { config } from "../config.js";
 import { openaiClient } from "../embeddings/client.js";
+import { readSyncStatus } from "../jobs/status.js";
 import { logger } from "../logger.js";
+import { redis } from "../redis-client.js";
 import { retrieveChunks } from "../retrieval/index.js";
 import { vectorIndex } from "../vector-store/pinecone-client.js";
 
@@ -42,6 +44,23 @@ syncRouter.post("/query", requireAuth(config.JWT_ACCESS_SECRET, logger), async (
     }
 
     res.status(200).json({ chunks: result.chunks });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Milestone #11's last-sync-status endpoint. Reads the single Redis key
+ * `writeSyncStatus`/`readSyncStatus` (`jobs/status.ts`) maintains -
+ * whatever the most recent sync run (scheduled or manually triggered)
+ * left behind, including per-file failures if any occurred. `status:
+ * null` (not an error) is the correct response before any sync has ever
+ * run yet.
+ */
+syncRouter.get("/status", requireAuth(config.JWT_ACCESS_SECRET, logger), async (_req: AuthenticatedRequest, res, next) => {
+  try {
+    const status = await readSyncStatus(redis);
+    res.status(200).json({ status });
   } catch (err) {
     next(err);
   }

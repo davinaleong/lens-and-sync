@@ -10,6 +10,7 @@ import { extractText } from "../extraction/index.js";
 import { deleteSyncState, getSyncStateRecord, listKnownFiles, upsertSyncState } from "../sync-state/index.js";
 import { deleteVectorsForFile, upsertChunkVectors, vectorId } from "../vector-store/index.js";
 import { acquireSyncLock, releaseSyncLock } from "./lock.js";
+import { writeSyncStatus } from "./status.js";
 
 export interface SyncDependencies {
   drive: drive_v3.Drive;
@@ -19,6 +20,10 @@ export interface SyncDependencies {
   embeddingDimensions?: number;
   vectorIndex: Index;
   chunkOptions?: ChunkOptions;
+  // Optional - per-file sync events (Milestone #11's "sync logs") are
+  // only logged when a logger is supplied, same optional-logger pattern
+  // as `shared-auth`'s `requireAuth`.
+  logger?: Logger;
 }
 
 export interface SyncFailure {
@@ -47,6 +52,7 @@ type FileSyncOutcome = { ok: true; reembedded: boolean } | { ok: false; reason: 
 async function syncOneFile(file: DriveFileMetadata, deps: SyncDependencies): Promise<FileSyncOutcome> {
   const extraction = await extractText(deps.drive, file);
   if (!extraction.ok) {
+    deps.logger?.warn({ event: "sync-file-failed", fileId: file.id, stage: "extract", reason: extraction.reason }, "File sync failed");
     return { ok: false, reason: extraction.reason };
   }
 
@@ -62,6 +68,7 @@ async function syncOneFile(file: DriveFileMetadata, deps: SyncDependencies): Pro
       driveModifiedTime: file.modifiedTime,
       chunkIds: known?.chunkIds ?? [],
     });
+    deps.logger?.info({ event: "sync-file-skipped-unchanged", fileId: file.id }, "File content unchanged - skipped re-embedding");
     return { ok: true, reembedded: false };
   }
 
@@ -70,6 +77,7 @@ async function syncOneFile(file: DriveFileMetadata, deps: SyncDependencies): Pro
     dimensions: deps.embeddingDimensions,
   });
   if (!embeddingResult.ok) {
+    deps.logger?.warn({ event: "sync-file-failed", fileId: file.id, stage: "embed", reason: embeddingResult.reason }, "File sync failed");
     return { ok: false, reason: embeddingResult.reason };
   }
 
@@ -87,11 +95,13 @@ async function syncOneFile(file: DriveFileMetadata, deps: SyncDependencies): Pro
   // sync (an upsert alone would leave the extra old ones behind).
   const deleteResult = await deleteVectorsForFile(deps.vectorIndex, file.id);
   if (!deleteResult.ok) {
+    deps.logger?.warn({ event: "sync-file-failed", fileId: file.id, stage: "delete-old-vectors", reason: deleteResult.reason }, "File sync failed");
     return { ok: false, reason: deleteResult.reason };
   }
 
   const upsertResult = await upsertChunkVectors(deps.vectorIndex, vectors);
   if (!upsertResult.ok) {
+    deps.logger?.warn({ event: "sync-file-failed", fileId: file.id, stage: "upsert", reason: upsertResult.reason }, "File sync failed");
     return { ok: false, reason: upsertResult.reason };
   }
 
@@ -104,6 +114,7 @@ async function syncOneFile(file: DriveFileMetadata, deps: SyncDependencies): Pro
     chunkIds: vectors.map((vector) => vectorId(vector.fileId, vector.chunkIndex)),
   });
 
+  deps.logger?.info({ event: "sync-file-synced", fileId: file.id, chunkCount: vectors.length }, "File synced");
   return { ok: true, reembedded: true };
 }
 
@@ -150,10 +161,12 @@ export async function runSyncOnce(deps: SyncDependencies): Promise<SyncRunResult
   for (const deletedId of changes.deletedFileIds) {
     const deleteResult = await deleteVectorsForFile(deps.vectorIndex, deletedId);
     if (!deleteResult.ok) {
+      deps.logger?.warn({ event: "sync-file-failed", fileId: deletedId, stage: "delete", reason: deleteResult.reason }, "File deletion failed");
       result.failures.push({ fileId: deletedId, reason: deleteResult.reason });
       continue;
     }
     await deleteSyncState(deletedId);
+    deps.logger?.info({ event: "sync-file-deleted", fileId: deletedId }, "File removed from Drive - vectors and sync state deleted");
     result.deletedFiles++;
   }
 
@@ -183,6 +196,12 @@ export async function scheduleSyncJob(queue: Queue, cronPattern: string): Promis
  * against a manually-triggered run overlapping a scheduled one. Skipping
  * (not failing) a run that can't acquire the lock is deliberate - lock
  * contention is an expected, benign outcome of overlap, not an error.
+ *
+ * `lockRedis` is reused (not a third connection) to also persist the
+ * last-sync-status record (`jobs/status.ts`, Milestone #11) - both are
+ * simple non-blocking `SET`/`GET`/`EVAL` commands, unlike the Worker's
+ * own blocking consumption loop on `connection`, so sharing this
+ * connection for both purposes is safe.
  */
 export function createSyncWorker(
   connection: ConnectionOptions,
@@ -200,12 +219,34 @@ export function createSyncWorker(
         logger.warn({ event: "sync-skipped-locked", jobId: job.id }, "Sync run skipped - another run already holds the lock");
         return undefined;
       }
+      const startedAt = new Date().toISOString();
       try {
         const result = await runSync();
+        const finishedAt = new Date().toISOString();
         logger.info({ event: "sync-completed", jobId: job.id, ...result }, "Sync run completed");
+        // The "failure alert" signal (Milestone #11) - a run can finish
+        // "successfully" (didn't throw) while still leaving individual
+        // files unsynced; this is a distinct, greppable/alertable log
+        // line for that partial-failure case, separate from the always-
+        // emitted summary above.
+        if (result.failures.length > 0) {
+          logger.warn(
+            { event: "sync-run-had-failures", jobId: job.id, failureCount: result.failures.length, failures: result.failures },
+            "Sync run completed with one or more file failures",
+          );
+        }
+        await writeSyncStatus(lockRedis, { startedAt, finishedAt, ok: true, result, error: null });
         return result;
       } catch (err) {
+        const finishedAt = new Date().toISOString();
         logger.error({ err, jobId: job.id }, "Sync run failed");
+        await writeSyncStatus(lockRedis, {
+          startedAt,
+          finishedAt,
+          ok: false,
+          result: null,
+          error: err instanceof Error ? err.message : String(err),
+        });
         throw err;
       } finally {
         await releaseSyncLock(lockRedis, lock);

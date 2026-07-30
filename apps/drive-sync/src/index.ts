@@ -80,6 +80,7 @@ createSyncWorker(
       embeddingModel: config.EMBEDDING_MODEL,
       embeddingDimensions: config.EMBEDDING_DIMENSIONS,
       vectorIndex,
+      logger,
     }),
   logger,
 );
