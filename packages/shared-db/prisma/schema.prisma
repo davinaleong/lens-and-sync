@@ -13,13 +13,15 @@ datasource db {
 // --- Shared identity ---
 
 model User {
-  id           String        @id @default(uuid())
-  email        String        @unique
-  passwordHash String
-  createdAt    DateTime      @default(now())
-  refreshTokens RefreshToken[]
-  savedChats   SavedChat[]
-  mealPlans    MealPlan[]
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  passwordHash       String
+  emailVerified      Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  refreshTokens      RefreshToken[]
+  savedChats         SavedChat[]
+  mealPlans          MealPlan[]
+  verificationTokens VerificationToken[]
 }
 
 model RefreshToken {
@@ -62,6 +64,28 @@ model SavedChat {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+enum VerificationTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  EMAIL_OTP
+}
+
+// Single table for all three token-based flows: email verification, password
+// reset, and OTP login. Type field discriminates; tokenHash is always
+// sha256 of the raw token/code so the plaintext never touches the DB.
+model VerificationToken {
+  id        String                @id @default(uuid())
+  userId    String
+  user      User                  @relation(fields: [userId], references: [id])
+  tokenHash String                @unique
+  type      VerificationTokenType
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime              @default(now())
+
+  @@index([userId, type])
 }
 
 model MealPlan {

@@ -42,6 +42,10 @@ const schema = z.object({
 
   UPLOAD_RATE_LIMIT_WINDOW_MS: z.coerce.number(),
   UPLOAD_RATE_LIMIT_MAX_UPLOADS: z.coerce.number(),
+
+  RESEND_API_KEY: z.string().min(1),
+  EMAIL_FROM: z.string().min(1),
+  APP_BASE_URL: z.string().url(),
 });
 
 export type Config = z.infer<typeof schema>;

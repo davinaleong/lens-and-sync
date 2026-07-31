@@ -15,7 +15,7 @@ interface TokenPair {
   refreshToken: string;
 }
 
-export type RegisterResult = { ok: true } & TokenPair | { ok: false; reason: "email-in-use" };
+export type RegisterResult = { ok: true; userId: string } & TokenPair | { ok: false; reason: "email-in-use" };
 export type LoginResult = { ok: true } & TokenPair | { ok: false; reason: "invalid-credentials" };
 export type RefreshResult = { ok: true } & TokenPair | { ok: false; reason: "invalid-refresh-token" };
 
@@ -36,7 +36,8 @@ function hashRefreshToken(token: string): string {
 // passwords - SHA-256 (deterministic) is correct here, not bcrypt/bcryptjs
 // (salted per-call, so unusable for the exact-match `tokenHash` lookup
 // `refreshTokens` below needs to check revocation).
-async function issueTokenPair(userId: string, tokens: TokenConfig): Promise<TokenPair> {
+// Exported so verification.ts can reuse it for OTP and future flows.
+export async function issueTokenPair(userId: string, tokens: TokenConfig): Promise<TokenPair> {
   const accessToken = signToken(userId, tokens.accessSecret, tokens.accessTtl);
   const refreshToken = signToken(userId, tokens.refreshSecret, tokens.refreshTtl);
   await prisma.refreshToken.create({
@@ -54,7 +55,7 @@ export async function registerUser(email: string, password: string, tokens: Toke
   const passwordHash = await hashPassword(password);
   const user = await prisma.user.create({ data: { email, passwordHash } });
   const pair = await issueTokenPair(user.id, tokens);
-  return { ok: true, ...pair };
+  return { ok: true, userId: user.id, ...pair };
 }
 
 export async function loginUser(email: string, password: string, tokens: TokenConfig): Promise<LoginResult> {
