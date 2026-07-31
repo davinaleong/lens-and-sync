@@ -14,8 +14,10 @@ Photo-to-recipe API for food analysis.
 - Photos stored in Google Cloud Storage; metadata in Postgres
 - Chat history persisted per user (Redis for live sessions, Postgres for saved chats)
 - Password-based auth (bcrypt) with rotating JWT access + refresh tokens
+- Email verification, OTP login, and password reset via Mailtrap
+- Meal planning (create plans, schedule dishes by date and meal type)
 
-**Routes:** `POST /auth/register` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /upload` · `GET /chats` · `GET /chats/:id`
+**Routes:** `POST /auth/register` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/verify-email` · `POST /auth/resend-verification` · `POST /auth/send-otp` · `POST /auth/verify-otp` · `POST /auth/forgot-password` · `POST /auth/reset-password` · `POST /upload` · `GET /chats` · `GET /chats/:id` · `POST /meal-plans` · `GET /meal-plans` · `GET /meal-plans/:id` · `DELETE /meal-plans/:id` · `POST /meal-plans/:id/entries` · `DELETE /meal-plans/:id/entries/:entryId`
 
 ### drive-sync (port 4001)
 
@@ -31,18 +33,18 @@ Google Drive → Pinecone sync worker with a RAG retrieval endpoint.
 
 ## Shared packages
 
-| Package         | Purpose                                                            |
-| --------------- | ------------------------------------------------------------------ |
-| `shared-auth`   | JWT sign/verify, `requireAuth` middleware                          |
-| `shared-config` | `loadEnv` + Zod schema helpers (`commaSeparated`, `jsonObject`, …) |
-| `shared-db`     | Prisma client + schema (User, RefreshToken, DriveFile, SavedChat)  |
-| `shared-logger` | Pino logger factory + security event helpers                       |
-| `shared-types`  | Cross-service TypeScript types                                     |
-| `shared-utils`  | Express middleware (HTTPS redirect, 404, error handler)            |
+| Package         | Purpose                                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| `shared-auth`   | JWT sign/verify, `requireAuth` middleware                                                                 |
+| `shared-config` | `loadEnv` + Zod schema helpers (`commaSeparated`, `jsonObject`, …)                                        |
+| `shared-db`     | Prisma client + schema (User, RefreshToken, VerificationToken, DriveFile, SavedChat, MealPlan, MealEntry) |
+| `shared-logger` | Pino logger factory + security event helpers                                                              |
+| `shared-types`  | Cross-service TypeScript types                                                                            |
+| `shared-utils`  | Express middleware (HTTPS redirect, 404, error handler)                                                   |
 
 ## Stack
 
-TypeScript · Node.js 20 · Express · Prisma (Postgres) · Redis · BullMQ · Pinecone · OpenAI · Anthropic Claude · Google Cloud Vision · Google Cloud Storage · Google Drive API · Zod · Vitest · Turbo · pnpm workspaces
+TypeScript · Node.js 20 · Express · Prisma (Postgres) · Redis · BullMQ · Pinecone · OpenAI · Anthropic Claude · Google Cloud Vision · Google Cloud Storage · Google Drive API · Mailtrap · Zod · Vitest · Turbo · pnpm workspaces
 
 ## Local development
 
@@ -88,3 +90,5 @@ base64 -i service-account.json | tr -d '\n'
 # PowerShell
 [Convert]::ToBase64String([System.IO.File]::ReadAllBytes("service-account.json"))
 ```
+
+For `dish-lens` email features, add `MAILTRAP_API_TOKEN`, `EMAIL_FROM` (a verified sender address in your Mailtrap account), and `APP_BASE_URL` to the Railway environment.
