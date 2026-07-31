@@ -2,6 +2,8 @@
 
 A pnpm monorepo containing two Node.js/TypeScript services — **DishLens** and **DriveSync** — backed by shared packages for auth, config, database, logging, and utilities.
 
+**[→ Full documentation](https://your-org.github.io/lens-and-sync)**
+
 ## Services
 
 ### dish-lens (port 4002)
