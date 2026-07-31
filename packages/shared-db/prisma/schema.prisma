@@ -19,6 +19,7 @@ model User {
   createdAt    DateTime      @default(now())
   refreshTokens RefreshToken[]
   savedChats   SavedChat[]
+  mealPlans    MealPlan[]
 }
 
 model RefreshToken {
@@ -61,4 +62,36 @@ model SavedChat {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+model MealPlan {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  name      String
+  entries   MealEntry[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([userId])
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+model MealEntry {
+  id         String    @id @default(uuid())
+  mealPlanId String
+  mealPlan   MealPlan  @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  date       DateTime  @db.Date
+  mealType   MealType
+  dishName   String
+  notes      String?
+  createdAt  DateTime  @default(now())
+
+  @@index([mealPlanId])
 }
