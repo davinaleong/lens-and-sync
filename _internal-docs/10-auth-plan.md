@@ -72,10 +72,10 @@
 
 ## M10 — Production rollout gap (Railway dashboard, not code)
 
-- [ ] Append `&& pnpm --filter @lens-and-sync/shared-db run migrate:deploy` to `dish-lens`'s Railway Build Command
-- [ ] Confirm this runs _before_ app startup, ahead of deploying passwordHash-dependent code
-- [ ] Deploy
-- [ ] Repeat the same curl sequence (register → login → refresh → logout → `/chats`) against `https://dish-lens-production.up.railway.app`
+- [x] Append `&& pnpm --filter @lens-and-sync/shared-db run migrate:deploy` to `dish-lens`'s Railway Build Command
+- [x] Confirm this runs _before_ app startup, ahead of deploying passwordHash-dependent code
+- [x] Deploy
+- [x] Repeat the same curl sequence (register → login → refresh → logout → `/chats`) against `https://dish-lens-production.up.railway.app`
 
 ## Explicitly out of scope (fast-follow, not this change)
 
