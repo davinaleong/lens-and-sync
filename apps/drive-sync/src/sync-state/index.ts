@@ -100,3 +100,27 @@ export async function upsertSyncState(record: SyncStateInput): Promise<void> {
 export async function deleteSyncState(driveFileId: string): Promise<void> {
   await prisma.driveFile.deleteMany({ where: { driveFileId } });
 }
+
+export interface AuditFileRecord {
+  driveFileId: string;
+  title: string;
+  sourceUrl: string;
+  chunkCount: number;
+  lastSyncedAt: string;
+  driveModifiedTime: string;
+}
+
+export async function listAllSyncState(): Promise<AuditFileRecord[]> {
+  const rows = await prisma.driveFile.findMany({
+    select: { driveFileId: true, title: true, sourceUrl: true, chunkIds: true, lastSyncedAt: true, driveModifiedTime: true },
+    orderBy: { lastSyncedAt: "desc" },
+  });
+  return rows.map((row: { driveFileId: string; title: string; sourceUrl: string; chunkIds: string[]; lastSyncedAt: Date; driveModifiedTime: Date }) => ({
+    driveFileId: row.driveFileId,
+    title: row.title,
+    sourceUrl: row.sourceUrl,
+    chunkCount: row.chunkIds.length,
+    lastSyncedAt: row.lastSyncedAt.toISOString(),
+    driveModifiedTime: row.driveModifiedTime.toISOString(),
+  }));
+}

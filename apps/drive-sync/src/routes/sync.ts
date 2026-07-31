@@ -8,6 +8,7 @@ import { readSyncStatus } from "../jobs/status.js";
 import { logger } from "../logger.js";
 import { redis } from "../redis-client.js";
 import { retrieveChunks } from "../retrieval/index.js";
+import { listAllSyncState } from "../sync-state/index.js";
 import { vectorIndex } from "../vector-store/pinecone-client.js";
 
 export const syncRouter: Router = Router();
@@ -61,6 +62,25 @@ syncRouter.get("/status", requireAuth(config.JWT_ACCESS_SECRET, logger), async (
   try {
     const status = await readSyncStatus(redis);
     res.status(200).json({ status });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Audit endpoint: last sync result + full Postgres index state in one call.
+ * Gives a complete picture of what the worker has processed without needing
+ * to query Postgres or Pinecone directly.
+ */
+syncRouter.get("/audit", requireAuth(config.JWT_ACCESS_SECRET, logger), async (_req: AuthenticatedRequest, res, next) => {
+  try {
+    const [lastSync, files] = await Promise.all([readSyncStatus(redis), listAllSyncState()]);
+    const totalChunks = files.reduce((sum, f) => sum + f.chunkCount, 0);
+    res.status(200).json({
+      generatedAt: new Date().toISOString(),
+      lastSync,
+      index: { totalFiles: files.length, totalChunks, files },
+    });
   } catch (err) {
     next(err);
   }
