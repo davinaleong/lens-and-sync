@@ -29,10 +29,41 @@ export const logLevelSchema = z
   .enum(["fatal", "error", "warn", "info", "debug", "trace"])
   .default("info");
 
-// Parses a JSON object from a string, stripping a wrapping/leading quote that
-// some platforms (Railway, Docker env_file) add around multi-line env var values.
-export const jsonObject = z.string().min(1).transform((s) => {
-  let raw = s.trim();
-  if (raw[0] === '"' || raw[0] === "'") raw = raw.endsWith(raw[0]) ? raw.slice(1, -1) : raw.slice(1);
-  return JSON.parse(raw) as Record<string, unknown>;
+// Parses a JSON object from an env var string. Accepts three formats so the
+// caller can use whichever survives their platform's env var handling:
+//   1. Raw JSON:            {"type":"service_account",...}
+//   2. Quote-wrapped JSON:  "{"type":"service_account",...}"  (Railway, Docker env_file)
+//   3. Base64-encoded JSON: eyJ0eXBlIjoic2Vy...  (most reliable for multi-line secrets)
+export const jsonObject = z.string().min(1).transform((s, ctx) => {
+  const raw = s.trim();
+
+  const tryParse = (v: string): Record<string, unknown> | null => {
+    try {
+      const val = JSON.parse(v);
+      return val !== null && typeof val === "object" && !Array.isArray(val)
+        ? (val as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  let result = tryParse(raw);
+  if (result) return result;
+
+  if (raw[0] === '"' || raw[0] === "'") {
+    result = tryParse(raw.endsWith(raw[0]) ? raw.slice(1, -1) : raw.slice(1));
+    if (result) return result;
+  }
+
+  try {
+    result = tryParse(Buffer.from(raw, "base64").toString("utf8"));
+    if (result) return result;
+  } catch { /* not base64 */ }
+
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "Must be a valid JSON object, optionally quote-wrapped or base64-encoded",
+  });
+  return z.NEVER;
 });
