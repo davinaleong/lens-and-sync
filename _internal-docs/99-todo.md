@@ -1,4 +1,8 @@
 # TODO
 
 - [x] DriveSync: Develop a simple strategy to audit the process so that I have visibility of the worker's status and indexes.
-- [ ] DishLens: Add meal planning.
+- [x] DishLens: Add meal planning.
+- [ ] DishLens: Add industry standard auth functions like:
+  - Email verification after signup
+  - Email OTP
+  - Reset password
