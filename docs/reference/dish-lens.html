@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DishLens API | Lens and Sync</title>
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="../index.html"><img src="../assets/favicon.svg" alt="">Lens and Sync</a>
+  <nav class="top-nav">
+    <a href="../guide/getting-started.html">Guide</a>
+    <div class="dropdown" tabindex="0">
+      <span class="dropdown-label">Reference ▾</span>
+      <div class="dropdown-menu">
+        <a href="dish-lens.html">DishLens API</a>
+        <a href="drive-sync.html">DriveSync API</a>
+        <a href="environment-variables.html">Environment variables</a>
+      </div>
+    </div>
+    <a href="../packages/index.html">Packages</a>
+    <a href="https://github.com/davinaleong/lens-and-sync" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <h4>API Reference</h4>
+    <ul>
+      <li><a href="dish-lens.html" aria-current="page">DishLens</a></li>
+      <li><a href="drive-sync.html">DriveSync</a></li>
+      <li><a href="environment-variables.html">Environment variables</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+    <h1>DishLens API</h1>
+    <p>Base URL: <code>https://dish-lens-production.up.railway.app</code></p>
+    <p>All routes except <code>/health</code> and the public auth routes require a JWT access token:</p>
+    <pre><code>Authorization: Bearer &lt;accessToken&gt;</code></pre>
+    <p>Error responses always use the shape <code>{ "error": { "code": string, "message": string } }</code>.</p>
+
+    <h2>Auth</h2>
+
+    <h3><code>POST /auth/register</code></h3>
+    <p>Create a new account. Automatically sends a verification email via Resend.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "email": "user@example.com", "password": "password123" }</code></pre>
+    <p>Password must be 8–72 characters.</p>
+    <p><strong>201 Created</strong></p>
+    <pre><code>{ "accessToken": "eyJ...", "refreshToken": "eyJ..." }</code></pre>
+    <p><strong>409 Conflict</strong> — <code>email-in-use</code></p>
+
+    <h3><code>POST /auth/login</code></h3>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "email": "user@example.com", "password": "password123" }</code></pre>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{ "accessToken": "eyJ...", "refreshToken": "eyJ..." }</code></pre>
+    <p><strong>401 Unauthorized</strong> — <code>invalid-credentials</code> (same response for unknown email and wrong password — no enumeration)</p>
+
+    <h3><code>POST /auth/refresh</code></h3>
+    <p>Rotate a refresh token. The submitted token is revoked and a new pair is issued. Reusing an already-rotated token returns 401.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "refreshToken": "eyJ..." }</code></pre>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{ "accessToken": "eyJ...", "refreshToken": "eyJ..." }</code></pre>
+    <p><strong>401 Unauthorized</strong> — <code>invalid-refresh-token</code></p>
+
+    <h3><code>POST /auth/logout</code></h3>
+    <p>Revoke a refresh token. Always returns 204 regardless of whether the token was valid.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "refreshToken": "eyJ..." }</code></pre>
+    <p><strong>204 No Content</strong></p>
+
+    <h3><code>POST /auth/verify-email</code></h3>
+    <p>Consume the token from the verification email.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "token": "&lt;raw token from email link&gt;" }</code></pre>
+    <p><strong>200 OK</strong> — <code>{ "message": "Email verified." }</code></p>
+    <p><strong>400 Bad Request</strong> — <code>invalid-token</code> | <code>expired-token</code> | <code>already-verified</code></p>
+
+    <h3><code>POST /auth/resend-verification</code></h3>
+    <p>Re-send the verification email. Requires authentication.</p>
+    <p><strong>200 OK</strong> — <code>{ "message": "Verification email sent if the address is unverified." }</code></p>
+
+    <h3><code>POST /auth/send-otp</code></h3>
+    <p>Send a 6-digit one-time login code. Always returns 200 — no enumeration of registered emails.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "email": "user@example.com" }</code></pre>
+    <p><strong>200 OK</strong> — <code>{ "message": "If an account exists for this email, a login code has been sent." }</code></p>
+
+    <h3><code>POST /auth/verify-otp</code></h3>
+    <p>Exchange a 6-digit OTP for a token pair. OTPs expire after 10 minutes and are single-use.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "email": "user@example.com", "code": "482910" }</code></pre>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{ "accessToken": "eyJ...", "refreshToken": "eyJ..." }</code></pre>
+    <p><strong>401 Unauthorized</strong> — <code>invalid-otp</code></p>
+
+    <h3><code>POST /auth/forgot-password</code></h3>
+    <p>Send a password reset link. Always returns 200.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "email": "user@example.com" }</code></pre>
+    <p><strong>200 OK</strong> — <code>{ "message": "If an account exists for this email, a reset link has been sent." }</code></p>
+
+    <h3><code>POST /auth/reset-password</code></h3>
+    <p>Set a new password using the token from the reset email. Tokens expire after 1 hour and are single-use.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "token": "&lt;raw token from reset link&gt;", "password": "newpassword123" }</code></pre>
+    <p><strong>200 OK</strong> — <code>{ "message": "Password reset successfully." }</code></p>
+    <p><strong>400 Bad Request</strong> — <code>invalid-token</code> | <code>expired-token</code></p>
+
+    <h2>Upload</h2>
+
+    <h3><code>POST /upload</code> <span class="badge">🔒</span></h3>
+    <p>Analyse a dish photo. Returns recipe, nutritional data, and a conversational message.</p>
+    <p><strong>Content-Type:</strong> <code>multipart/form-data</code></p>
+    <table>
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>image</code></td><td>file</td><td>JPEG or PNG, max 20 MB, max 8192×8192 px</td></tr>
+      </tbody>
+    </table>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{
+  "dishName": "Pad Thai",
+  "recipe": {
+    "ingredients": ["200g rice noodles", "..."],
+    "steps": ["..."]
+  },
+  "nutrition": {
+    "calories": 520,
+    "protein": 22,
+    "carbs": 68,
+    "fat": 14
+  },
+  "message": "This looks like Pad Thai! Here's a recipe..."
+}</code></pre>
+    <p><strong>400 Bad Request</strong> — <code>no-image</code> | <code>invalid-image-type</code> | <code>image-too-large</code> | <code>image-too-large-dimensions</code> | <code>blurry-image</code></p>
+    <p><strong>422 Unprocessable Entity</strong> — <code>not-food</code> (image passed upload checks but Vision didn't detect a dish)</p>
+
+    <h2>Chat history</h2>
+
+    <h3><code>GET /chats</code> <span class="badge">🔒</span></h3>
+    <p>List all saved chat sessions for the authenticated user, newest first.</p>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{
+  "chats": [
+    { "id": "uuid", "dishName": "Pad Thai", "createdAt": "2026-07-31T..." },
+    ...
+  ]
+}</code></pre>
+
+    <h3><code>GET /chats/:chatId</code> <span class="badge">🔒</span></h3>
+    <p>Get a single saved chat with full message history.</p>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{
+  "chat": {
+    "id": "uuid",
+    "dishName": "Pad Thai",
+    "messages": [
+      { "role": "user", "content": "..." },
+      { "role": "assistant", "content": "..." }
+    ],
+    "createdAt": "2026-07-31T..."
+  }
+}</code></pre>
+    <p><strong>404 Not Found</strong> — <code>not-found</code></p>
+
+    <h2>Meal planning</h2>
+
+    <h3><code>POST /meal-plans</code> <span class="badge">🔒</span></h3>
+    <p><strong>Body</strong></p>
+    <pre><code>{ "name": "Week of 4 Aug" }</code></pre>
+    <p><strong>201 Created</strong></p>
+    <pre><code>{
+  "plan": {
+    "id": "uuid",
+    "name": "Week of 4 Aug",
+    "createdAt": "...",
+    "updatedAt": "..."
+  }
+}</code></pre>
+
+    <h3><code>GET /meal-plans</code> <span class="badge">🔒</span></h3>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{
+  "plans": [
+    {
+      "id": "uuid",
+      "name": "Week of 4 Aug",
+      "entryCount": 7,
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ]
+}</code></pre>
+
+    <h3><code>GET /meal-plans/:planId</code> <span class="badge">🔒</span></h3>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{
+  "plan": {
+    "id": "uuid",
+    "name": "Week of 4 Aug",
+    "entries": [
+      {
+        "id": "uuid",
+        "date": "2026-08-04",
+        "mealType": "LUNCH",
+        "dishName": "Pad Thai",
+        "notes": null,
+        "createdAt": "..."
+      }
+    ],
+    "createdAt": "...",
+    "updatedAt": "..."
+  }
+}</code></pre>
+
+    <h3><code>DELETE /meal-plans/:planId</code> <span class="badge">🔒</span></h3>
+    <p>Deletes the plan and all its entries (cascade).</p>
+    <p><strong>204 No Content</strong></p>
+
+    <h3><code>POST /meal-plans/:planId/entries</code> <span class="badge">🔒</span></h3>
+    <p><strong>Body</strong></p>
+    <pre><code>{
+  "date": "2026-08-04",
+  "mealType": "LUNCH",
+  "dishName": "Pad Thai",
+  "notes": "Optional note"
+}</code></pre>
+    <p><code>mealType</code> must be one of <code>BREAKFAST</code>, <code>LUNCH</code>, <code>DINNER</code>, <code>SNACK</code>.</p>
+    <p><strong>201 Created</strong> — <code>{ "entry": { ... } }</code></p>
+
+    <h3><code>DELETE /meal-plans/:planId/entries/:entryId</code> <span class="badge">🔒</span></h3>
+    <p><strong>204 No Content</strong></p>
+
+    <h2>Health</h2>
+
+    <h3><code>GET /health</code></h3>
+    <p><strong>200 OK</strong> — <code>{ "status": "ok" }</code></p>
+
+    <p class="edit-link"><a href="https://github.com/davinaleong/lens-and-sync/edit/main/docs/reference/dish-lens.html">Edit this page on GitHub</a></p>
+  </main>
+</div>
+
+<footer class="site-footer">Released under the MIT License.</footer>
+</body>
+</html>

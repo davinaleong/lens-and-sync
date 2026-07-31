@@ -12,10 +12,7 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "db:generate": "pnpm --filter @lens-and-sync/shared-db run generate",
-    "db:migrate": "pnpm --filter @lens-and-sync/shared-db run migrate",
-    "docs:dev": "pnpm --filter @lens-and-sync/docs run dev",
-    "docs:build": "pnpm --filter @lens-and-sync/docs run build",
-    "docs:preview": "pnpm --filter @lens-and-sync/docs run preview"
+    "db:migrate": "pnpm --filter @lens-and-sync/shared-db run migrate"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",

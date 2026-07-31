@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DriveSync API | Lens and Sync</title>
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="../index.html"><img src="../assets/favicon.svg" alt="">Lens and Sync</a>
+  <nav class="top-nav">
+    <a href="../guide/getting-started.html">Guide</a>
+    <div class="dropdown" tabindex="0">
+      <span class="dropdown-label">Reference ▾</span>
+      <div class="dropdown-menu">
+        <a href="dish-lens.html">DishLens API</a>
+        <a href="drive-sync.html">DriveSync API</a>
+        <a href="environment-variables.html">Environment variables</a>
+      </div>
+    </div>
+    <a href="../packages/index.html">Packages</a>
+    <a href="https://github.com/davinaleong/lens-and-sync" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <h4>API Reference</h4>
+    <ul>
+      <li><a href="dish-lens.html">DishLens</a></li>
+      <li><a href="drive-sync.html" aria-current="page">DriveSync</a></li>
+      <li><a href="environment-variables.html">Environment variables</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+    <h1>DriveSync API</h1>
+    <p>Base URL: <code>https://drive-sync-production.up.railway.app</code></p>
+    <p>All routes except <code>/health</code> require a JWT access token issued by <strong>DishLens</strong> — the two services share the same <code>JWT_ACCESS_SECRET</code>.</p>
+    <pre><code>Authorization: Bearer &lt;accessToken&gt;</code></pre>
+
+    <h2>Sync</h2>
+
+    <h3><code>POST /sync/query</code> <span class="badge">🔒</span></h3>
+    <p>Semantic search over indexed Drive content using RAG retrieval.</p>
+    <p><strong>Body</strong></p>
+    <pre><code>{
+  "query": "What is our refund policy?",
+  "topK": 5
+}</code></pre>
+    <p><code>topK</code> defaults to 5, max 20.</p>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{
+  "chunks": [
+    {
+      "fileId": "1abc...",
+      "title": "Refund Policy v2",
+      "sourceUrl": "https://drive.google.com/file/d/1abc...",
+      "section": "Section 3",
+      "score": 0.91
+    }
+  ]
+}</code></pre>
+    <div class="info">
+      <p>Chunk text is intentionally not returned — only source attribution metadata. The caller fetches the source document via <code>sourceUrl</code> if they need the full content.</p>
+    </div>
+    <p><strong>502 Bad Gateway</strong> — retrieval pipeline error</p>
+
+    <h3><code>GET /sync/status</code> <span class="badge">🔒</span></h3>
+    <p>Last sync run outcome from Redis.</p>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{
+  "status": {
+    "startedAt": "2026-07-31T03:00:00.000Z",
+    "finishedAt": "2026-07-31T03:00:42.831Z",
+    "ok": true,
+    "result": {
+      "newFiles": 2,
+      "updatedFiles": 1,
+      "skippedUnchanged": 14,
+      "deletedFiles": 0,
+      "failures": []
+    },
+    "error": null
+  }
+}</code></pre>
+    <p><code>status</code> is <code>null</code> if no sync has run yet.</p>
+
+    <h3><code>GET /sync/audit</code> <span class="badge">🔒</span></h3>
+    <p>Full index snapshot — last sync result plus every tracked file with chunk counts.</p>
+    <p><strong>200 OK</strong></p>
+    <pre><code>{
+  "generatedAt": "2026-07-31T12:00:00.000Z",
+  "lastSync": { ... },
+  "index": {
+    "totalFiles": 17,
+    "totalChunks": 312,
+    "files": [
+      {
+        "driveFileId": "1abc...",
+        "title": "Q2 Report",
+        "sourceUrl": "https://drive.google.com/...",
+        "chunkCount": 22,
+        "lastSyncedAt": "2026-07-31T03:00:42.000Z",
+        "driveModifiedTime": "2026-07-30T18:00:00.000Z"
+      }
+    ]
+  }
+}</code></pre>
+
+    <h2>Health</h2>
+
+    <h3><code>GET /health</code></h3>
+    <p><strong>200 OK</strong> — <code>{ "status": "ok" }</code></p>
+
+    <h2>Sync worker</h2>
+    <p>The sync worker runs as a BullMQ job on the cron schedule defined by <code>SYNC_CRON_SCHEDULE</code>. It is not triggered via HTTP — it starts automatically when the service starts.</p>
+    <p>A Redis-backed distributed lock (<code>drivesync:&lt;queue&gt;:lock</code>) prevents overlapping runs. If a sync is already running when the next cron fires, the new run is <strong>skipped</strong> (not queued) and a warning is logged.</p>
+
+    <h3>Sync algorithm</h3>
+    <pre><code>for each folder in GOOGLE_DRIVE_FOLDER_IDS:
+  list current files (id + modifiedTime)
+
+compare against Postgres DriveFile rows (detectChanges):
+  → newFiles:      files not in Postgres
+  → updatedFiles:  files where driveModifiedTime changed
+  → deletedFiles:  files in Postgres but not in Drive
+
+for each new/updated file:
+  extract text  (Google Drive export API)
+  compute SHA-256 content hash
+  if hash unchanged from stored value:
+    update driveModifiedTime only (skip re-embedding)
+  else:
+    chunk text → embed chunks (OpenAI) → delete old vectors → upsert new vectors (Pinecone)
+    persist new sync state (Postgres)
+
+for each deleted file:
+  delete vectors from Pinecone
+  delete DriveFile row from Postgres</code></pre>
+
+    <p class="edit-link"><a href="https://github.com/davinaleong/lens-and-sync/edit/main/docs/reference/drive-sync.html">Edit this page on GitHub</a></p>
+  </main>
+</div>
+
+<footer class="site-footer">Released under the MIT License.</footer>
+</body>
+</html>

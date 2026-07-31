@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lens and Sync</title>
+<meta name="description" content="DishLens food-analysis API and DriveSync RAG pipeline — developer documentation.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html"><img src="assets/favicon.svg" alt="">Lens and Sync</a>
+  <nav class="top-nav">
+    <a href="guide/getting-started.html">Guide</a>
+    <div class="dropdown" tabindex="0">
+      <span class="dropdown-label">Reference ▾</span>
+      <div class="dropdown-menu">
+        <a href="reference/dish-lens.html">DishLens API</a>
+        <a href="reference/drive-sync.html">DriveSync API</a>
+        <a href="reference/environment-variables.html">Environment variables</a>
+      </div>
+    </div>
+    <a href="packages/index.html">Packages</a>
+    <a href="https://github.com/davinaleong/lens-and-sync" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <h1>Lens and Sync</h1>
+  <p class="tagline">DishLens turns a photo into a recipe. DriveSync turns your Drive files into a searchable knowledge base.</p>
+  <div class="actions">
+    <a class="brand-btn" href="guide/getting-started.html">Get started</a>
+    <a class="alt-btn" href="reference/dish-lens.html">API reference</a>
+  </div>
+</section>
+
+<section class="features">
+  <div class="feature">
+    <div class="icon">🍽️</div>
+    <h3>DishLens</h3>
+    <p>Upload a dish photo and get back recipe suggestions, nutritional data, and a persistent chat history. Backed by Google Vision, Anthropic Claude, and Edamam.</p>
+  </div>
+  <div class="feature">
+    <div class="icon">🔄</div>
+    <h3>DriveSync</h3>
+    <p>Periodically indexes your Google Drive files using OpenAI embeddings and Pinecone. Exposes a semantic search endpoint for RAG-style retrieval.</p>
+  </div>
+  <div class="feature">
+    <div class="icon">🔐</div>
+    <h3>Shared auth</h3>
+    <p>JWT access + refresh token rotation, password-based registration, email verification, OTP login, and password reset — all in one shared package.</p>
+  </div>
+  <div class="feature">
+    <div class="icon">📦</div>
+    <h3>Monorepo</h3>
+    <p>pnpm workspaces + Turborepo. Six shared packages (auth, config, db, logger, types, utils) eliminate duplication between the two services.</p>
+  </div>
+</section>
+
+<footer class="site-footer">Released under the MIT License.</footer>
+</body>
+</html>

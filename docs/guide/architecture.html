@@ -1,9 +1,45 @@
-# Architecture
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture | Lens and Sync</title>
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="../index.html"><img src="../assets/favicon.svg" alt="">Lens and Sync</a>
+  <nav class="top-nav">
+    <a href="getting-started.html">Guide</a>
+    <div class="dropdown" tabindex="0">
+      <span class="dropdown-label">Reference ▾</span>
+      <div class="dropdown-menu">
+        <a href="../reference/dish-lens.html">DishLens API</a>
+        <a href="../reference/drive-sync.html">DriveSync API</a>
+        <a href="../reference/environment-variables.html">Environment variables</a>
+      </div>
+    </div>
+    <a href="../packages/index.html">Packages</a>
+    <a href="https://github.com/davinaleong/lens-and-sync" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
 
-## Monorepo layout
+<div class="layout">
+  <aside class="sidebar">
+    <h4>Guide</h4>
+    <ul>
+      <li><a href="getting-started.html">Getting started</a></li>
+      <li><a href="architecture.html" aria-current="page">Architecture</a></li>
+      <li><a href="deployment.html">Deployment</a></li>
+    </ul>
+  </aside>
 
-```
-lens-and-sync/
+  <main class="content">
+    <h1>Architecture</h1>
+
+    <h2>Monorepo layout</h2>
+    <pre><code>lens-and-sync/
 ├── apps/
 │   ├── dish-lens/      # Food-analysis API  (port 4002)
 │   └── drive-sync/     # Drive → Pinecone sync worker  (port 4001)
@@ -14,15 +50,13 @@ lens-and-sync/
 │   ├── shared-logger/  # Pino logger factory + security events
 │   ├── shared-types/   # Cross-service TypeScript types
 │   └── shared-utils/   # Express middleware (HTTPS, 404, error handler)
-├── docs/               # This documentation site (VitePress)
+├── docs/               # This documentation site (static HTML)
 └── infra/
     ├── docker-compose.yml
-    └── terraform/
-```
+    └── terraform/</code></pre>
 
-## Service interactions
-
-```mermaid
+    <h2>Service interactions</h2>
+    <pre class="mermaid">
 graph TD
     Client["iOS / Web client"]
 
@@ -75,39 +109,29 @@ graph TD
     DS_Worker --> Pinecone
     DS_Worker --> PG
     DS_Worker --> Redis
-```
+    </pre>
 
-## Authentication flow
-
-Both services share the same JWT scheme. DishLens issues tokens; DriveSync only verifies them.
-
-```
-POST /auth/register  ──►  bcrypt hash  ──►  Postgres User row
+    <h2>Authentication flow</h2>
+    <p>Both services share the same JWT scheme. DishLens issues tokens; DriveSync only verifies them.</p>
+    <pre><code>POST /auth/register  ──►  bcrypt hash  ──►  Postgres User row
                      ◄──  access + refresh tokens (JWT, signed with separate secrets)
 
 POST /auth/login     ──►  bcrypt compare  ──►  issue token pair
 POST /auth/refresh   ──►  sha256(token) lookup in RefreshToken table
                           revoke old row  ──►  issue new token pair
-POST /auth/logout    ──►  revoke refresh token row
-```
+POST /auth/logout    ──►  revoke refresh token row</code></pre>
+    <p>Email-based flows (verification, OTP, reset) store a <code>sha256(token)</code> in the <code>VerificationToken</code> table with an expiry and single-use flag.</p>
 
-Email-based flows (verification, OTP, reset) store a `sha256(token)` in the `VerificationToken` table with an expiry and single-use flag.
-
-## Database schema (shared)
-
-```
-User ──── RefreshToken (1:N)
+    <h2>Database schema (shared)</h2>
+    <pre><code>User ──── RefreshToken (1:N)
      ──── SavedChat    (1:N)
      ──── MealPlan     (1:N) ──── MealEntry (1:N)
      ──── VerificationToken (1:N)
 
-DriveFile  (DriveSync only)
-```
+DriveFile  (DriveSync only)</code></pre>
 
-## Sync worker lifecycle
-
-```
-Cron trigger (BullMQ)
+    <h2>Sync worker lifecycle</h2>
+    <pre><code>Cron trigger (BullMQ)
   └─► Acquire Redis lock  (prevents overlap with manual triggers)
         └─► List Drive folders  ──►  detectChanges vs Postgres DriveFile rows
               ├─► New / updated files:
@@ -116,5 +140,17 @@ Cron trigger (BullMQ)
               │             └─► upsertSyncState (Postgres)
               └─► Deleted files:
                     deleteVectorsForFile (Pinecone) → deleteSyncState (Postgres)
-  └─► Release lock  ──►  writeSyncStatus (Redis)
-```
+  └─► Release lock  ──►  writeSyncStatus (Redis)</code></pre>
+
+    <p class="edit-link"><a href="https://github.com/davinaleong/lens-and-sync/edit/main/docs/guide/architecture.html">Edit this page on GitHub</a></p>
+  </main>
+</div>
+
+<footer class="site-footer">Released under the MIT License.</footer>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+</script>
+</body>
+</html>

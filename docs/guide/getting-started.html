@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting started | Lens and Sync</title>
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="../index.html"><img src="../assets/favicon.svg" alt="">Lens and Sync</a>
+  <nav class="top-nav">
+    <a href="getting-started.html">Guide</a>
+    <div class="dropdown" tabindex="0">
+      <span class="dropdown-label">Reference ▾</span>
+      <div class="dropdown-menu">
+        <a href="../reference/dish-lens.html">DishLens API</a>
+        <a href="../reference/drive-sync.html">DriveSync API</a>
+        <a href="../reference/environment-variables.html">Environment variables</a>
+      </div>
+    </div>
+    <a href="../packages/index.html">Packages</a>
+    <a href="https://github.com/davinaleong/lens-and-sync" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <h4>Guide</h4>
+    <ul>
+      <li><a href="getting-started.html" aria-current="page">Getting started</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="deployment.html">Deployment</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+    <h1>Getting started</h1>
+
+    <h2>Prerequisites</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>Version</th></tr></thead>
+      <tbody>
+        <tr><td>Node.js</td><td>≥ 20</td></tr>
+        <tr><td>pnpm</td><td>9.x (<code>corepack enable &amp;&amp; corepack prepare</code>)</td></tr>
+        <tr><td>Docker</td><td>any recent version (for local Postgres + Redis)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>1. Clone and install</h2>
+    <pre><code>git clone https://github.com/davinaleong/lens-and-sync.git
+cd lens-and-sync
+pnpm install</code></pre>
+
+    <h2>2. Start backing services</h2>
+    <pre><code>docker compose -f infra/docker-compose.yml up -d postgres redis</code></pre>
+    <p>This starts Postgres on <code>localhost:5432</code> and Redis on <code>localhost:6379</code> using the credentials in the compose file.</p>
+
+    <h2>3. Configure environment variables</h2>
+    <p>Copy the example files for each app you want to run:</p>
+    <pre><code>cp apps/dish-lens/.env.example  apps/dish-lens/.env
+cp apps/drive-sync/.env.example apps/drive-sync/.env</code></pre>
+    <p>Then fill in the required values — see <a href="../reference/environment-variables.html">Environment variables</a> for the full reference.</p>
+
+    <h2>4. Run migrations</h2>
+    <pre><code>pnpm db:migrate</code></pre>
+    <p>This runs <code>prisma migrate dev</code> against the shared database and generates the Prisma client.</p>
+
+    <h2>5. Start the services</h2>
+    <pre><code># Both services in watch mode (via Turborepo)
+pnpm dev
+
+# Or individually
+pnpm --filter @lens-and-sync/dish-lens  dev
+pnpm --filter @lens-and-sync/drive-sync dev</code></pre>
+
+    <table>
+      <thead><tr><th>Service</th><th>URL</th></tr></thead>
+      <tbody>
+        <tr><td>DishLens</td><td>http://localhost:4002</td></tr>
+        <tr><td>DriveSync</td><td>http://localhost:4001</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Useful commands</h2>
+    <pre><code>pnpm build        # Compile all packages and apps
+pnpm test         # Run all test suites
+pnpm typecheck    # Type-check without emitting
+pnpm lint         # ESLint across the whole repo
+pnpm db:migrate   # Create + apply a Prisma migration (dev)
+pnpm db:generate  # Regenerate the Prisma client only</code></pre>
+
+    <h2>Quick smoke test</h2>
+    <p>Once DishLens is running, register an account and upload a photo:</p>
+    <pre><code>BASE=http://localhost:4002
+
+# Register
+curl -s -X POST $BASE/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"password123"}' | jq
+
+# Upload a dish photo (returns recipe + nutrition)
+TOKEN="&lt;accessToken from register&gt;"
+curl -s -X POST $BASE/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "image=@/path/to/dish.jpg" | jq</code></pre>
+
+    <p class="edit-link"><a href="https://github.com/davinaleong/lens-and-sync/edit/main/docs/guide/getting-started.html">Edit this page on GitHub</a></p>
+  </main>
+</div>
+
+<footer class="site-footer">Released under the MIT License.</footer>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared packages | Lens and Sync</title>
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="../index.html"><img src="../assets/favicon.svg" alt="">Lens and Sync</a>
+  <nav class="top-nav">
+    <a href="../guide/getting-started.html">Guide</a>
+    <div class="dropdown" tabindex="0">
+      <span class="dropdown-label">Reference ▾</span>
+      <div class="dropdown-menu">
+        <a href="../reference/dish-lens.html">DishLens API</a>
+        <a href="../reference/drive-sync.html">DriveSync API</a>
+        <a href="../reference/environment-variables.html">Environment variables</a>
+      </div>
+    </div>
+    <a href="index.html">Packages</a>
+    <a href="https://github.com/davinaleong/lens-and-sync" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <h4>Shared packages</h4>
+    <ul>
+      <li><a href="index.html" aria-current="page">Overview</a></li>
+      <li><a href="#shared-auth">shared-auth</a></li>
+      <li><a href="#shared-config">shared-config</a></li>
+      <li><a href="#shared-db">shared-db</a></li>
+      <li><a href="#shared-logger">shared-logger</a></li>
+      <li><a href="#shared-types">shared-types</a></li>
+      <li><a href="#shared-utils">shared-utils</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+    <h1>Shared packages</h1>
+    <p>Six packages under <code>packages/</code> eliminate duplication between DishLens and DriveSync. All are internal workspace packages — not published to npm.</p>
+
+    <h2 id="shared-auth">shared-auth</h2>
+    <p><strong><code>@lens-and-sync/shared-auth</code></strong></p>
+    <p>JWT sign/verify and Express authentication middleware.</p>
+    <h3>Exports</h3>
+    <pre><code>// Sign a JWT (access or refresh — differentiated by secret + TTL args)
+signToken(userId: string, secret: string, ttl: string): string
+
+// Verify a token; returns { ok: true, userId } or { ok: false, reason }
+verifyAccessToken(token: string, secret: string): VerifyResult
+
+// Express middleware — attaches req.userId on success, returns 401 on failure
+requireAuth(secret: string, logger: Logger): RequestHandler</code></pre>
+    <h3><code>AuthenticatedRequest</code></h3>
+    <p>Routes that use <code>requireAuth</code> can type <code>req</code> as <code>AuthenticatedRequest</code> to access <code>req.userId</code>.</p>
+
+    <h2 id="shared-config">shared-config</h2>
+    <p><strong><code>@lens-and-sync/shared-config</code></strong></p>
+    <p>Environment variable loading with Zod schema validation. Throws at startup if any required var is missing or invalid — fail-fast before accepting traffic.</p>
+    <h3>Exports</h3>
+    <pre><code>// Parse process.env through a Zod schema; throws on validation failure
+loadEnv&lt;Schema extends ZodTypeAny&gt;(schema: Schema, source?: NodeJS.ProcessEnv): z.infer&lt;Schema&gt;
+
+// Zod schema: parses comma-separated string → string[]
+commaSeparated: ZodEffects&lt;ZodString, string[]&gt;
+
+// Zod schema: parses JSON object from env var string.
+// Accepts plain JSON, quote-wrapped JSON (Railway/Docker), or base64-encoded JSON.
+jsonObject: ZodEffects&lt;ZodString, Record&lt;string, unknown&gt;&gt;
+
+// Zod schemas for common env var shapes
+nodeEnvSchema: ZodEnum&lt;["development", "test", "production"]&gt;
+logLevelSchema: ZodEnum&lt;["fatal", "error", "warn", "info", "debug", "trace"]&gt;</code></pre>
+
+    <h2 id="shared-db">shared-db</h2>
+    <p><strong><code>@lens-and-sync/shared-db</code></strong></p>
+    <p>Prisma client and schema. Re-exports everything from <code>@prisma/client</code> so consumers don't need to install it directly.</p>
+    <h3>Models</h3>
+    <table>
+      <thead><tr><th>Model</th><th>Owner</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>User</code></td><td>DishLens</td><td>Registered users (email + bcrypt passwordHash + emailVerified)</td></tr>
+        <tr><td><code>RefreshToken</code></td><td>DishLens</td><td>Active refresh tokens (stored as sha256 hash)</td></tr>
+        <tr><td><code>VerificationToken</code></td><td>DishLens</td><td>Email verification, OTP, and password reset tokens</td></tr>
+        <tr><td><code>SavedChat</code></td><td>DishLens</td><td>Write-once chat history records</td></tr>
+        <tr><td><code>MealPlan</code></td><td>DishLens</td><td>Named meal plans</td></tr>
+        <tr><td><code>MealEntry</code></td><td>DishLens</td><td>Individual meals within a plan</td></tr>
+        <tr><td><code>DriveFile</code></td><td>DriveSync</td><td>Sync state for each indexed Drive file</td></tr>
+      </tbody>
+    </table>
+    <h3>Usage</h3>
+    <pre><code>import { prisma, type User } from "@lens-and-sync/shared-db";
+
+const user = await prisma.user.findUnique({ where: { email } });</code></pre>
+    <h3>Migrations</h3>
+    <p>Migrations are in <code>packages/shared-db/prisma/migrations/</code>. Run with:</p>
+    <pre><code>pnpm db:generate         # regenerate client only
+pnpm db:migrate          # dev (creates new migration)</code></pre>
+
+    <h2 id="shared-logger">shared-logger</h2>
+    <p><strong><code>@lens-and-sync/shared-logger</code></strong></p>
+    <p>Pino-based structured logger factory with security event helpers.</p>
+    <h3>Exports</h3>
+    <pre><code>// Create a Pino logger with the given name and level
+createLogger(name: string, level: string): Logger
+
+// Log a security-relevant event (auth failures, rate limits, etc.)
+logSecurityEvent(logger: Logger, event: SecurityEvent): void</code></pre>
+    <h3>Security event types</h3>
+    <p><code>"auth-failed"</code> | <code>"auth-rejected"</code> | <code>"rate-limited"</code> | <code>"upload-rejected"</code></p>
+
+    <h2 id="shared-types">shared-types</h2>
+    <p><strong><code>@lens-and-sync/shared-types</code></strong></p>
+    <p>Shared TypeScript types used across services. Currently houses the cross-service type contracts.</p>
+
+    <h2 id="shared-utils">shared-utils</h2>
+    <p><strong><code>@lens-and-sync/shared-utils</code></strong></p>
+    <p>Reusable Express middleware.</p>
+    <h3>Exports</h3>
+    <pre><code>// Redirect HTTP → HTTPS in production
+enforceHttps(nodeEnv: string): RequestHandler
+
+// 404 handler — returns { error: { code: "not-found", message: "..." } }
+notFoundHandler(): RequestHandler
+
+// Fallback error handler — logs + returns 500
+createFallbackErrorHandler(logger: Logger): ErrorRequestHandler</code></pre>
+
+    <p class="edit-link"><a href="https://github.com/davinaleong/lens-and-sync/edit/main/docs/packages/index.html">Edit this page on GitHub</a></p>
+  </main>
+</div>
+
+<footer class="site-footer">Released under the MIT License.</footer>
+</body>
+</html>
