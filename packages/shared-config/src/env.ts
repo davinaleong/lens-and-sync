@@ -28,3 +28,11 @@ export const nodeEnvSchema = z.enum(["development", "test", "production"]).defau
 export const logLevelSchema = z
   .enum(["fatal", "error", "warn", "info", "debug", "trace"])
   .default("info");
+
+// Parses a JSON object from a string, stripping a wrapping/leading quote that
+// some platforms (Railway, Docker env_file) add around multi-line env var values.
+export const jsonObject = z.string().min(1).transform((s) => {
+  let raw = s.trim();
+  if (raw[0] === '"' || raw[0] === "'") raw = raw.endsWith(raw[0]) ? raw.slice(1, -1) : raw.slice(1);
+  return JSON.parse(raw) as Record<string, unknown>;
+});

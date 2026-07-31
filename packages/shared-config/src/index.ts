@@ -1,1 +1,1 @@
-export { loadEnv, commaSeparated, nodeEnvSchema, logLevelSchema } from "./env.js";
+export { loadEnv, commaSeparated, nodeEnvSchema, logLevelSchema, jsonObject } from "./env.js";

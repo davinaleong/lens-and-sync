@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { commaSeparated, loadEnv, logLevelSchema, nodeEnvSchema } from "@lens-and-sync/shared-config";
+import { commaSeparated, jsonObject, loadEnv, logLevelSchema, nodeEnvSchema } from "@lens-and-sync/shared-config";
 
 const schema = z.object({
   PORT: z.coerce.number().default(4001),
@@ -15,8 +15,7 @@ const schema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number(),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number(),
 
-  // Docker env_file keeps surrounding quotes; dotenv strips them — normalise both.
-  GOOGLE_CLOUD_CREDENTIALS_JSON: z.string().min(1).transform((s) => JSON.parse(s.trim().replace(/^(["'])[\s\S]*\1$/, (m, q) => m.slice(1, -1))) as Record<string, unknown>),
+  GOOGLE_CLOUD_CREDENTIALS_JSON: jsonObject,
   GOOGLE_DRIVE_FOLDER_IDS: commaSeparated,
 
   PINECONE_API_KEY: z.string().min(1),
