@@ -1,6 +1,6 @@
 # Shared packages
 
-Six packages under `packages/` eliminate duplication between dish-lens and drive-sync. All are internal workspace packages — not published to npm.
+Six packages under `packages/` eliminate duplication between DishLens and DriveSync. All are internal workspace packages — not published to npm.
 
 ## shared-auth
 
@@ -63,13 +63,13 @@ Prisma client and schema. Re-exports everything from `@prisma/client` so consume
 
 | Model               | Owner      | Description                                                    |
 | ------------------- | ---------- | -------------------------------------------------------------- |
-| `User`              | dish-lens  | Registered users (email + bcrypt passwordHash + emailVerified) |
-| `RefreshToken`      | dish-lens  | Active refresh tokens (stored as sha256 hash)                  |
-| `VerificationToken` | dish-lens  | Email verification, OTP, and password reset tokens             |
-| `SavedChat`         | dish-lens  | Write-once chat history records                                |
-| `MealPlan`          | dish-lens  | Named meal plans                                               |
-| `MealEntry`         | dish-lens  | Individual meals within a plan                                 |
-| `DriveFile`         | drive-sync | Sync state for each indexed Drive file                         |
+| `User`              | DishLens  | Registered users (email + bcrypt passwordHash + emailVerified) |
+| `RefreshToken`      | DishLens  | Active refresh tokens (stored as sha256 hash)                  |
+| `VerificationToken` | DishLens  | Email verification, OTP, and password reset tokens             |
+| `SavedChat`         | DishLens  | Write-once chat history records                                |
+| `MealPlan`          | DishLens  | Named meal plans                                               |
+| `MealEntry`         | DishLens  | Individual meals within a plan                                 |
+| `DriveFile`         | DriveSync | Sync state for each indexed Drive file                         |
 
 ### Usage
 

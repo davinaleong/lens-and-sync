@@ -1,4 +1,4 @@
-# dish-lens API
+# DishLens API
 
 Base URL: `https://dish-lens-production.up.railway.app`
 

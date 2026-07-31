@@ -15,10 +15,10 @@ hero:
 
 features:
   - icon: 🍽️
-    title: dish-lens
+    title: DishLens
     details: Upload a dish photo and get back recipe suggestions, nutritional data, and a persistent chat history. Backed by Google Vision, Anthropic Claude, and Edamam.
   - icon: 🔄
-    title: drive-sync
+    title: DriveSync
     details: Periodically indexes your Google Drive files using OpenAI embeddings and Pinecone. Exposes a semantic search endpoint for RAG-style retrieval.
   - icon: 🔐
     title: Shared auth

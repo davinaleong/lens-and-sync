@@ -1,8 +1,8 @@
-# drive-sync API
+# DriveSync API
 
 Base URL: `https://drive-sync-production.up.railway.app`
 
-All routes except `/health` require a JWT access token issued by **dish-lens** — the two services share the same `JWT_ACCESS_SECRET`.
+All routes except `/health` require a JWT access token issued by **DishLens** — the two services share the same `JWT_ACCESS_SECRET`.
 
 ```
 Authorization: Bearer <accessToken>

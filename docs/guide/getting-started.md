@@ -54,10 +54,10 @@ pnpm --filter @lens-and-sync/dish-lens  dev
 pnpm --filter @lens-and-sync/drive-sync dev
 ```
 
-| Service    | URL                   |
-| ---------- | --------------------- |
-| dish-lens  | http://localhost:4002 |
-| drive-sync | http://localhost:4001 |
+| Service   | URL                   |
+| --------- | --------------------- |
+| DishLens  | http://localhost:4002 |
+| DriveSync | http://localhost:4001 |
 
 ## Useful commands
 
@@ -72,7 +72,7 @@ pnpm db:generate  # Regenerate the Prisma client only
 
 ## Quick smoke test
 
-Once dish-lens is running, register an account and upload a photo:
+Once DishLens is running, register an account and upload a photo:
 
 ```sh
 BASE=http://localhost:4002

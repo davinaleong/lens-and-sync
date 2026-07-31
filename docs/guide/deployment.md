@@ -9,10 +9,10 @@ Both services are deployed on [Railway](https://railway.app). Each service is a 
 - Anthropic API key
 - Edamam API credentials
 - Resend account + verified sender domain
-- Pinecone index (drive-sync only)
-- OpenAI API key (drive-sync only)
+- Pinecone index (DriveSync only)
+- OpenAI API key (DriveSync only)
 
-## dish-lens
+## DishLens
 
 ### Railway build command
 
@@ -30,9 +30,9 @@ node apps/dish-lens/dist/index.js
 
 ### Required environment variables
 
-See [dish-lens environment variables](/reference/environment-variables#dish-lens).
+See [DishLens environment variables](/reference/environment-variables#dishlens).
 
-## drive-sync
+## DriveSync
 
 ### Railway build command
 
@@ -40,7 +40,7 @@ See [dish-lens environment variables](/reference/environment-variables#dish-lens
 pnpm --filter @lens-and-sync/drive-sync... run build
 ```
 
-drive-sync shares the same database as dish-lens. Migrations are only run from the dish-lens build step — running them twice is idempotent but the dish-lens deploy must happen first.
+DriveSync shares the same database as DishLens. Migrations are only run from the DishLens build step — running them twice is idempotent but the DishLens deploy must happen first.
 
 ### Start command
 
@@ -50,7 +50,7 @@ node apps/drive-sync/dist/index.js
 
 ### Required environment variables
 
-See [drive-sync environment variables](/reference/environment-variables#drive-sync).
+See [DriveSync environment variables](/reference/environment-variables#drivesync).
 
 ## Google credentials
 

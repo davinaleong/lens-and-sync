@@ -17,8 +17,8 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/guide/getting-started" },
       { text: "Reference", items: [
-        { text: "dish-lens API", link: "/reference/dish-lens" },
-        { text: "drive-sync API", link: "/reference/drive-sync" },
+        { text: "DishLens API", link: "/reference/dish-lens" },
+        { text: "DriveSync API", link: "/reference/drive-sync" },
         { text: "Environment variables", link: "/reference/environment-variables" },
       ]},
       { text: "Packages", link: "/packages/" },
@@ -34,8 +34,8 @@ export default defineConfig({
       ],
       "/reference/": [
         { text: "API Reference", items: [
-          { text: "dish-lens", link: "/reference/dish-lens" },
-          { text: "drive-sync", link: "/reference/drive-sync" },
+          { text: "DishLens", link: "/reference/dish-lens" },
+          { text: "DriveSync", link: "/reference/drive-sync" },
           { text: "Environment variables", link: "/reference/environment-variables" },
         ]},
       ],

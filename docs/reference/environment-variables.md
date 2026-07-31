@@ -1,6 +1,6 @@
 # Environment variables
 
-## dish-lens
+## DishLens
 
 Copy `apps/dish-lens/.env.example` → `apps/dish-lens/.env` and fill in all values.
 
@@ -98,7 +98,7 @@ Copy `apps/dish-lens/.env.example` → `apps/dish-lens/.env` and fill in all val
 
 ---
 
-## drive-sync
+## DriveSync
 
 Copy `apps/drive-sync/.env.example` → `apps/drive-sync/.env` and fill in all values.
 
@@ -111,14 +111,14 @@ Copy `apps/drive-sync/.env.example` → `apps/drive-sync/.env` and fill in all v
 | `LOG_LEVEL`            | `info`                  | Pino log level                          |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | Allowed CORS origins                    |
 
-### Auth (shared with dish-lens)
+### Auth (shared with DishLens)
 
 | Variable             | Description                                                               |
 | -------------------- | ------------------------------------------------------------------------- |
-| `JWT_ACCESS_SECRET`  | Must match dish-lens — drive-sync only verifies tokens, never issues them |
-| `JWT_REFRESH_SECRET` | Must match dish-lens                                                      |
-| `JWT_ACCESS_TTL`     | Must match dish-lens                                                      |
-| `JWT_REFRESH_TTL`    | Must match dish-lens                                                      |
+| `JWT_ACCESS_SECRET`  | Must match DishLens — DriveSync only verifies tokens, never issues them |
+| `JWT_REFRESH_SECRET` | Must match DishLens                                                      |
+| `JWT_ACCESS_TTL`     | Must match DishLens                                                      |
+| `JWT_REFRESH_TTL`    | Must match DishLens                                                      |
 
 ### Rate limiting
 
@@ -131,7 +131,7 @@ Copy `apps/drive-sync/.env.example` → `apps/drive-sync/.env` and fill in all v
 
 | Variable                        | Description                                                                           |
 | ------------------------------- | ------------------------------------------------------------------------------------- |
-| `GOOGLE_CLOUD_CREDENTIALS_JSON` | Service account key — plain JSON, quote-wrapped, or base64. Same format as dish-lens. |
+| `GOOGLE_CLOUD_CREDENTIALS_JSON` | Service account key — plain JSON, quote-wrapped, or base64. Same format as DishLens. |
 | `GOOGLE_DRIVE_FOLDER_IDS`       | Comma-separated list of Drive folder IDs to index                                     |
 
 ### Pinecone

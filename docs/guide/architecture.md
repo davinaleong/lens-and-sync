@@ -26,7 +26,7 @@ lens-and-sync/
 graph TD
     Client["iOS / Web client"]
 
-    subgraph dish-lens
+    subgraph DishLens
         DL_API["Express API\n:4002"]
         DL_Auth["Auth service\n(bcrypt + JWT)"]
         DL_Upload["Upload pipeline\n(Vision → Claude → Edamam)"]
@@ -35,7 +35,7 @@ graph TD
         DL_Email["Email\n(Resend)"]
     end
 
-    subgraph drive-sync
+    subgraph DriveSync
         DS_API["Express API\n:4001"]
         DS_Worker["BullMQ worker\n(cron sync)"]
         DS_Embed["Embedding pipeline\n(OpenAI)"]
@@ -79,7 +79,7 @@ graph TD
 
 ## Authentication flow
 
-Both services share the same JWT scheme. dish-lens issues tokens; drive-sync only verifies them.
+Both services share the same JWT scheme. DishLens issues tokens; DriveSync only verifies them.
 
 ```
 POST /auth/register  ──►  bcrypt hash  ──►  Postgres User row
@@ -101,7 +101,7 @@ User ──── RefreshToken (1:N)
      ──── MealPlan     (1:N) ──── MealEntry (1:N)
      ──── VerificationToken (1:N)
 
-DriveFile  (drive-sync only)
+DriveFile  (DriveSync only)
 ```
 
 ## Sync worker lifecycle
