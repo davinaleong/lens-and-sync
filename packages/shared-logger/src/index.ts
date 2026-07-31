@@ -56,6 +56,7 @@ export function createLogger(options: CreateLoggerOptions, destination?: NodeJS.
 
 export type SecurityEventType =
   | "auth-rejected"
+  | "auth-failed"
   | "upload-rejected"
   | "rate-limited"
   | "moderation-blocked"

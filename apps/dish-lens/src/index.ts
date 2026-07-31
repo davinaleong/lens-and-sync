@@ -6,6 +6,7 @@ import helmet from "helmet";
 import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { authRouter } from "./routes/auth.js";
 import { historyRouter } from "./routes/history.js";
 import { uploadRouter } from "./routes/upload.js";
 import { redis } from "./session/redis-client.js";
@@ -51,6 +52,7 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+app.use("/auth", authRouter);
 app.use("/upload", uploadRouter);
 app.use("/chats", historyRouter);
 
