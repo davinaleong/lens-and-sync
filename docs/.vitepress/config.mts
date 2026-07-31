@@ -8,7 +8,7 @@ export default defineConfig({
   base,
   title: "Lens and Sync",
   description: "DishLens food-analysis API and DriveSync RAG pipeline — developer documentation.",
-  head: [["link", { rel: "icon", href: `${base}favicon.ico` }]],
+  head: [["link", { rel: "icon", type: "image/svg+xml", href: `${base}favicon.svg` }]],
 
   themeConfig: {
     logo: "/logo.svg",
@@ -42,17 +42,18 @@ export default defineConfig({
       "/packages/": [
         { text: "Shared packages", items: [
           { text: "Overview", link: "/packages/" },
-          { text: "shared-auth", link: "/packages/shared-auth" },
-          { text: "shared-config", link: "/packages/shared-config" },
-          { text: "shared-db", link: "/packages/shared-db" },
-          { text: "shared-logger", link: "/packages/shared-logger" },
-          { text: "shared-utils", link: "/packages/shared-utils" },
+          { text: "shared-auth", link: "/packages/#shared-auth" },
+          { text: "shared-config", link: "/packages/#shared-config" },
+          { text: "shared-db", link: "/packages/#shared-db" },
+          { text: "shared-logger", link: "/packages/#shared-logger" },
+          { text: "shared-types", link: "/packages/#shared-types" },
+          { text: "shared-utils", link: "/packages/#shared-utils" },
         ]},
       ],
     },
 
     socialLinks: [
-      { icon: "github", link: "https://github.com/your-org/lens-and-sync" },
+      { icon: "github", link: "https://github.com/davinaleong/lens-and-sync" },
     ],
 
     footer: {
@@ -62,7 +63,7 @@ export default defineConfig({
     search: { provider: "local" },
 
     editLink: {
-      pattern: "https://github.com/your-org/lens-and-sync/edit/main/docs/:path",
+      pattern: "https://github.com/davinaleong/lens-and-sync/edit/main/docs/:path",
       text: "Edit this page on GitHub",
     },
   },

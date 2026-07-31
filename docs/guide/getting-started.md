@@ -11,7 +11,7 @@
 ## 1. Clone and install
 
 ```sh
-git clone https://github.com/your-org/lens-and-sync.git
+git clone https://github.com/davinaleong/lens-and-sync.git
 cd lens-and-sync
 pnpm install
 ```
