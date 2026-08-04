@@ -105,3 +105,13 @@ export async function revokeRefreshToken(refreshToken: string): Promise<void> {
     data: { revokedAt: new Date() },
   });
 }
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+}
+
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  return prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, emailVerified: true } });
+}

@@ -2,7 +2,7 @@ import { logSecurityEvent } from "@lens-and-sync/shared-logger";
 import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
 import { z } from "zod";
-import { loginUser, registerUser, refreshTokens, revokeRefreshToken, type TokenConfig } from "../auth/service.js";
+import { getUserProfile, loginUser, registerUser, refreshTokens, revokeRefreshToken, type TokenConfig } from "../auth/service.js";
 import { requestEmailVerification, requestOtp, requestPasswordReset, resetPassword, verifyEmailToken, verifyOtp } from "../auth/verification.js";
 import { config } from "../config.js";
 import { requireAuth, type AuthenticatedRequest } from "@lens-and-sync/shared-auth";
@@ -113,6 +113,19 @@ authRouter.post("/logout", async (req, res, next) => {
 
     await revokeRefreshToken(parsed.data.refreshToken);
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.get("/me", requireAuth(config.JWT_ACCESS_SECRET, logger), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const user = await getUserProfile(req.userId as string);
+    if (!user) {
+      res.status(404).json({ error: { code: "not-found", message: "User not found." } });
+      return;
+    }
+    res.status(200).json({ user });
   } catch (err) {
     next(err);
   }
