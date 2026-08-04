@@ -2,6 +2,12 @@ FROM node:20-slim AS base
 WORKDIR /app
 RUN corepack enable
 # sharp needs libvips at runtime; node:20-slim + sharp's prebuilt binaries cover this on linux/amd64 & arm64
+# Prisma's engine binaries need OpenSSL - node:20-slim doesn't ship it, which
+# makes Prisma fail to detect the libssl version and then try (and fail, as
+# the non-root `node` user) to fetch a differently-linked engine at runtime.
+# Installing it here, before `pnpm install` first fetches the engines, means
+# the correctly-linked one is fetched once and no runtime write is needed.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
