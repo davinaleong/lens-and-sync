@@ -101,6 +101,12 @@ export async function deleteSyncState(driveFileId: string): Promise<void> {
   await prisma.driveFile.deleteMany({ where: { driveFileId } });
 }
 
+/** Scopes on-demand text fetching (routes/sync.ts's GET /document/:fileId) to files this deployment actually syncs, not arbitrary Drive files the service account happens to be able to read. */
+export async function getKnownFile(driveFileId: string): Promise<{ title: string; sourceUrl: string } | null> {
+  const row = await prisma.driveFile.findUnique({ where: { driveFileId }, select: { title: true, sourceUrl: true } });
+  return row ?? null;
+}
+
 export interface AuditFileRecord {
   driveFileId: string;
   title: string;

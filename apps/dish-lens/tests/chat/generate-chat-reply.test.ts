@@ -69,4 +69,28 @@ describe("generateChatReply", () => {
 
     expect(result).toEqual({ ok: false, reason: "invalid-response" });
   });
+
+  it("includes a matched personal recipe's title and text in the system prompt when provided", async () => {
+    const client = fakeClient("Sure!");
+
+    await generateChatReply(client, "claude-sonnet-5", dish, [], "How do I make this?", {
+      fileId: "abc123",
+      title: "Grandma's Margherita Pizza",
+      sourceUrl: "https://docs.google.com/document/d/abc123",
+      text: "Use San Marzano tomatoes and fresh basil.",
+    });
+
+    const call = (client.messages.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.system).toContain("Grandma's Margherita Pizza");
+    expect(call.system).toContain("San Marzano tomatoes");
+  });
+
+  it("omits any personal-recipe section from the system prompt when none was found", async () => {
+    const client = fakeClient("Sure!");
+
+    await generateChatReply(client, "claude-sonnet-5", dish, [], "How do I make this?", null);
+
+    const call = (client.messages.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.system).not.toContain("own saved recipe");
+  });
 });

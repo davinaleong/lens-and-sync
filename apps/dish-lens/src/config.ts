@@ -46,6 +46,12 @@ const schema = z.object({
   RESEND_API_KEY: z.string().min(1),
   EMAIL_FROM: z.string().min(1),
   APP_BASE_URL: z.string().url(),
+
+  // Optional - when unset, chat replies skip personal-recipe lookup
+  // entirely rather than failing. Lets drive-sync's RAG query/document
+  // endpoints be queried during chat replies, using the same request's
+  // own bearer token (both services share JWT_ACCESS_SECRET).
+  DRIVE_SYNC_BASE_URL: z.string().url().optional(),
 });
 
 export type Config = z.infer<typeof schema>;

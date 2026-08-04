@@ -5,11 +5,32 @@ import { z } from "zod";
 import { extractDishContext } from "../chat/dish-context.js";
 import { generateChatReply } from "../chat/index.js";
 import { config } from "../config.js";
+import { findPersonalRecipe, type PersonalRecipe } from "../drive-sync-client/index.js";
 import { saveChat } from "../history/save-chat.js";
 import { logger } from "../logger.js";
 import { anthropicClient } from "../recipe/client.js";
 import { redis } from "../session/redis-client.js";
 import { createSessionStore } from "../session/session-store.js";
+
+function bearerToken(authHeader: string | undefined): string | undefined {
+  return authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+}
+
+/**
+ * Best-effort - a drive-sync outage or missing config must never break
+ * chat itself, so any failure here just means "no personal recipe found
+ * this turn," not an error surfaced to the user.
+ */
+async function lookupPersonalRecipe(accessToken: string | undefined, query: string): Promise<PersonalRecipe | null> {
+  if (!config.DRIVE_SYNC_BASE_URL || !accessToken) return null;
+  try {
+    const result = await findPersonalRecipe(config.DRIVE_SYNC_BASE_URL, accessToken, query);
+    return result.ok ? result.recipe : null;
+  } catch (err) {
+    logger.error({ err }, "Personal recipe lookup failed - continuing without it.");
+    return null;
+  }
+}
 
 const sessionStore = createSessionStore(redis, config.REDIS_SESSION_TTL_SECONDS);
 
@@ -60,7 +81,16 @@ chatSessionRouter.post("/:sessionId/messages", async (req: AuthenticatedRequest,
     // The last entry is the user message just appended, passed separately.
     const history = afterUser.messages.slice(1, -1);
 
-    const result = await generateChatReply(anthropicClient, config.ANTHROPIC_MODEL, dish, history, parsed.data.content);
+    const personalRecipe = await lookupPersonalRecipe(bearerToken(req.headers.authorization), parsed.data.content);
+
+    const result = await generateChatReply(
+      anthropicClient,
+      config.ANTHROPIC_MODEL,
+      dish,
+      history,
+      parsed.data.content,
+      personalRecipe,
+    );
     if (!result.ok) {
       res.status(502).json({
         error: { code: "reply-generation-failed", message: "Could not generate a reply. Please try again." },

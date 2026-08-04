@@ -3,12 +3,14 @@ import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
 import { z } from "zod";
 import { config } from "../config.js";
+import { driveClient } from "../drive/client.js";
 import { openaiClient } from "../embeddings/client.js";
+import { extractText } from "../extraction/index.js";
 import { readSyncStatus } from "../jobs/status.js";
 import { logger } from "../logger.js";
 import { redis } from "../redis-client.js";
 import { retrieveChunks } from "../retrieval/index.js";
-import { listAllSyncState } from "../sync-state/index.js";
+import { getKnownFile, listAllSyncState } from "../sync-state/index.js";
 import { vectorIndex } from "../vector-store/pinecone-client.js";
 
 export const syncRouter: Router = Router();
@@ -45,6 +47,56 @@ syncRouter.post("/query", requireAuth(config.JWT_ACCESS_SECRET, logger), async (
     }
 
     res.status(200).json({ chunks: result.chunks });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const EXTRACTION_ERROR_RESPONSES: Record<Exclude<Awaited<ReturnType<typeof extractText>>, { ok: true }>["reason"], { status: number; message: string }> = {
+  "unsupported-mime-type": { status: 415, message: "This file's format isn't supported for text extraction." },
+  "empty-content": { status: 422, message: "This file has no extractable text content." },
+  "scanned-pdf-ocr-not-implemented": { status: 422, message: "This PDF appears to be scanned images - text extraction (OCR) isn't supported yet." },
+  "extraction-failed": { status: 502, message: "Could not extract text from this file. Please try again." },
+};
+
+/**
+ * On-demand plain-text fetch for a single synced file - deliberately
+ * fetched live from Drive on every call rather than cached/stored
+ * anywhere (Pinecone metadata still never gets raw content, per
+ * `vector-store/index.ts`). Scoped to files this deployment actually
+ * tracks (`getKnownFile`) rather than any Drive file the service
+ * account's credentials happen to be able to read, so this can't become
+ * an arbitrary Drive-read proxy.
+ */
+syncRouter.get("/document/:fileId", requireAuth(config.JWT_ACCESS_SECRET, logger), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const fileId = req.params.fileId;
+    if (!fileId) {
+      res.status(400).json({ error: { code: "invalid-request", message: "A file ID is required." } });
+      return;
+    }
+
+    const known = await getKnownFile(fileId);
+    if (!known) {
+      res.status(404).json({ error: { code: "not-found", message: "That file isn't part of the synced index." } });
+      return;
+    }
+
+    const meta = await driveClient.files.get({ fileId, fields: "mimeType" });
+    const mimeType = meta.data.mimeType;
+    if (!mimeType) {
+      res.status(502).json({ error: { code: "extraction-failed", message: "Could not read this file's metadata from Drive." } });
+      return;
+    }
+
+    const extracted = await extractText(driveClient, { id: fileId, mimeType });
+    if (!extracted.ok) {
+      const response = EXTRACTION_ERROR_RESPONSES[extracted.reason];
+      res.status(response.status).json({ error: { code: extracted.reason, message: response.message } });
+      return;
+    }
+
+    res.status(200).json({ fileId, title: known.title, sourceUrl: known.sourceUrl, text: extracted.text });
   } catch (err) {
     next(err);
   }
