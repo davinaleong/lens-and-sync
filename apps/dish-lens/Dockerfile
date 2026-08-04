@@ -21,15 +21,16 @@ RUN pnpm --filter @lens-and-sync/dish-lens... run build
 
 FROM base AS runtime
 ENV NODE_ENV=production
-COPY --from=build /app/pnpm-workspace.yaml /app/package.json /app/pnpm-lock.yaml ./
-# All shared-* packages, not just shared-db - node_modules/@lens-and-sync/*
-# symlinks (copied below) point into here, and dish-lens imports from
-# several of them (shared-auth, shared-config, shared-logger, shared-utils),
-# not just shared-db.
-COPY --from=build /app/packages packages
-COPY --from=build /app/apps/dish-lens/dist ./dist
-COPY --from=build /app/node_modules ./node_modules
+# pnpm gives every app/package its own local node_modules full of symlinks
+# back into the root .pnpm store (not just a single hoisted root
+# node_modules) - dish-lens's own node_modules/@lens-and-sync/* AND
+# node_modules/express etc, plus packages/shared-db's own node_modules for
+# `prisma` (needed by migrate:deploy below), are just as required as the
+# root node_modules/.pnpm store they point into. Copying the whole build
+# output wholesale, preserving the exact structure that successfully
+# built, avoids re-discovering which specific subdirectory is missing.
+COPY --from=build /app /app
 USER node
 # runs pending Prisma migrations against DATABASE_URL before the server starts —
 # migrate:deploy is idempotent, so this is safe on every deploy/restart
-CMD ["sh", "-c", "pnpm --filter @lens-and-sync/shared-db run migrate:deploy && node dist/index.js"]
+CMD ["sh", "-c", "pnpm --filter @lens-and-sync/shared-db run migrate:deploy && node apps/dish-lens/dist/index.js"]
