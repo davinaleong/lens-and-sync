@@ -21,7 +21,11 @@ RUN pnpm --filter @lens-and-sync/drive-sync... run build
 FROM base AS runtime
 ENV NODE_ENV=production
 COPY --from=build /app/pnpm-workspace.yaml /app/package.json /app/pnpm-lock.yaml ./
-COPY --from=build /app/packages/shared-db packages/shared-db
+# All shared-* packages, not just shared-db - node_modules/@lens-and-sync/*
+# symlinks (copied below) point into here, and drive-sync imports from
+# several of them (shared-config, shared-logger, shared-utils), not just
+# shared-db.
+COPY --from=build /app/packages packages
 COPY --from=build /app/apps/drive-sync/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 USER node
