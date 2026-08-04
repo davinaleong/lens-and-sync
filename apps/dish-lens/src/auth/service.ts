@@ -115,3 +115,60 @@ export interface UserProfile {
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
   return prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, emailVerified: true } });
 }
+
+export type ChangePasswordResult = ({ ok: true } & TokenPair) | { ok: false; reason: "incorrect-password" };
+
+/**
+ * Revokes every existing refresh token for the user (any other device/
+ * session gets logged out) and issues a fresh pair for the request that
+ * just changed the password, so this device doesn't also need to log
+ * back in.
+ */
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+  tokens: TokenConfig,
+): Promise<ChangePasswordResult> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    return { ok: false, reason: "incorrect-password" };
+  }
+
+  const valid = await verifyPassword(currentPassword, user.passwordHash);
+  if (!valid) {
+    return { ok: false, reason: "incorrect-password" };
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+    prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+  ]);
+
+  const pair = await issueTokenPair(userId, tokens);
+  return { ok: true, ...pair };
+}
+
+export type DeleteAccountResult = { ok: true } | { ok: false; reason: "incorrect-password" };
+
+/**
+ * Password-confirmed, immediate, permanent. Every related row (refresh
+ * tokens, saved chats, meal plans/entries, scans, verification tokens)
+ * cascades via the schema's ON DELETE CASCADE - a single `user.delete`
+ * is genuinely all this needs.
+ */
+export async function deleteAccount(userId: string, password: string): Promise<DeleteAccountResult> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    return { ok: false, reason: "incorrect-password" };
+  }
+
+  const valid = await verifyPassword(password, user.passwordHash);
+  if (!valid) {
+    return { ok: false, reason: "incorrect-password" };
+  }
+
+  await prisma.user.delete({ where: { id: userId } });
+  return { ok: true };
+}

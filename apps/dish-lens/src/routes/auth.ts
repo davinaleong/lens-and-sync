@@ -2,7 +2,7 @@ import { logSecurityEvent } from "@lens-and-sync/shared-logger";
 import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
 import { z } from "zod";
-import { getUserProfile, loginUser, registerUser, refreshTokens, revokeRefreshToken, type TokenConfig } from "../auth/service.js";
+import { changePassword, deleteAccount, getUserProfile, loginUser, registerUser, refreshTokens, revokeRefreshToken, type TokenConfig } from "../auth/service.js";
 import { requestEmailVerification, requestOtp, requestPasswordReset, resetPassword, verifyEmailToken, verifyOtp } from "../auth/verification.js";
 import { config } from "../config.js";
 import { requireAuth, type AuthenticatedRequest } from "@lens-and-sync/shared-auth";
@@ -126,6 +126,55 @@ authRouter.get("/me", requireAuth(config.JWT_ACCESS_SECRET, logger), async (req:
       return;
     }
     res.status(200).json({ user });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(72),
+});
+
+authRouter.post("/change-password", requireAuth(config.JWT_ACCESS_SECRET, logger), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const parsed = changePasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: "invalid-request", message: "Current password and a new password (8-72 characters) are required." } });
+      return;
+    }
+
+    const result = await changePassword(req.userId as string, parsed.data.currentPassword, parsed.data.newPassword, tokens);
+    if (!result.ok) {
+      logSecurityEvent(logger, { type: "auth-failed", route: "POST /auth/change-password", reason: result.reason, statusCode: 401, userId: req.userId });
+      res.status(401).json({ error: { code: "incorrect-password", message: "Current password is incorrect." } });
+      return;
+    }
+
+    res.status(200).json({ accessToken: result.accessToken, refreshToken: result.refreshToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const deleteAccountSchema = z.object({ password: z.string().min(1) });
+
+authRouter.delete("/me", requireAuth(config.JWT_ACCESS_SECRET, logger), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const parsed = deleteAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: "invalid-request", message: "Your password is required to delete your account." } });
+      return;
+    }
+
+    const result = await deleteAccount(req.userId as string, parsed.data.password);
+    if (!result.ok) {
+      logSecurityEvent(logger, { type: "auth-failed", route: "DELETE /auth/me", reason: result.reason, statusCode: 401, userId: req.userId });
+      res.status(401).json({ error: { code: "incorrect-password", message: "Password is incorrect." } });
+      return;
+    }
+
+    res.status(204).send();
   } catch (err) {
     next(err);
   }
