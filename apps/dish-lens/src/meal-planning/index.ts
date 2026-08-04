@@ -1,4 +1,5 @@
 import { type MealEntry, type MealPlan, type MealType, prisma } from "@lens-and-sync/shared-db";
+import { getScan } from "../scans/index.js";
 
 export type { MealType };
 
@@ -13,9 +14,13 @@ export interface MealPlanSummary {
 export interface MealEntryInput {
   date: string;
   mealType: MealType;
-  dishName: string;
+  scanId: string;
   notes?: string;
 }
+
+export type AddMealEntryResult =
+  | { ok: true; entry: MealEntry }
+  | { ok: false; reason: "plan-not-found" | "scan-not-found" };
 
 export interface FullMealPlan {
   id: string;
@@ -25,6 +30,7 @@ export interface FullMealPlan {
     date: string;
     mealType: MealType;
     dishName: string;
+    ingredients: string[];
     notes: string | null;
     createdAt: Date;
   }>;
@@ -59,6 +65,7 @@ export async function getMealPlan(userId: string, planId: string): Promise<FullM
       date: e.date.toISOString().slice(0, 10),
       mealType: e.mealType,
       dishName: e.dishName,
+      ingredients: e.ingredients,
       notes: e.notes,
       createdAt: e.createdAt,
     })),
@@ -72,13 +79,28 @@ export async function deleteMealPlan(userId: string, planId: string): Promise<bo
   return result.count > 0;
 }
 
-export async function addMealEntry(userId: string, planId: string, data: MealEntryInput): Promise<MealEntry | null> {
+export async function addMealEntry(userId: string, planId: string, data: MealEntryInput): Promise<AddMealEntryResult> {
   // Verify ownership before writing to prevent cross-user writes.
   const plan = await prisma.mealPlan.findFirst({ where: { id: planId, userId }, select: { id: true } });
-  if (!plan) return null;
-  return prisma.mealEntry.create({
-    data: { mealPlanId: planId, date: new Date(data.date), mealType: data.mealType, dishName: data.dishName, notes: data.notes },
+  if (!plan) return { ok: false, reason: "plan-not-found" };
+
+  // dishName/ingredients are never client-supplied - always copied
+  // server-side from an owned Scan, so a plan entry can't claim ingredients
+  // that were never actually produced by a real upload.
+  const scan = await getScan(userId, data.scanId);
+  if (!scan) return { ok: false, reason: "scan-not-found" };
+
+  const entry = await prisma.mealEntry.create({
+    data: {
+      mealPlanId: planId,
+      date: new Date(data.date),
+      mealType: data.mealType,
+      dishName: scan.dishName,
+      ingredients: scan.ingredients,
+      notes: data.notes,
+    },
   });
+  return { ok: true, entry };
 }
 
 export async function removeMealEntry(userId: string, planId: string, entryId: string): Promise<boolean> {

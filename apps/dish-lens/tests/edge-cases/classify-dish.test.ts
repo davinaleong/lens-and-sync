@@ -17,9 +17,16 @@ describe("classifyDish", () => {
     expect(classifyDish(labels, thresholds)).toEqual({ ok: true, dishName: "Pizza", confidence: 0.92 });
   });
 
-  it("rejects as multi-dish when two distinct specific labels both clear the threshold", () => {
+  it("rejects as multi-dish when two distinct specific labels both clear the threshold, carrying both as candidates", () => {
     const labels = [label("Pizza", 0.88), label("Salad", 0.75), label("Food", 0.9)];
-    expect(classifyDish(labels, thresholds)).toEqual({ ok: false, reason: "multi-dish" });
+    expect(classifyDish(labels, thresholds)).toEqual({
+      ok: false,
+      reason: "multi-dish",
+      candidates: [
+        { label: "Pizza", confidence: 0.88 },
+        { label: "Salad", confidence: 0.75 },
+      ],
+    });
   });
 
   it("rejects a raw ingredient (egg) as non-dish, not as an unidentified dish", () => {
@@ -47,14 +54,18 @@ describe("classifyDish", () => {
     expect(classifyDish(labels, thresholds)).toEqual({ ok: false, reason: "non-dish" });
   });
 
-  it("rejects as low-confidence when food evidence exists but no specific label clears the bar", () => {
+  it("rejects as low-confidence when food evidence exists but no specific label clears the bar, with no candidates to offer", () => {
     const labels = [label("Food", 0.55), label("Dish", 0.52)];
-    expect(classifyDish(labels, thresholds)).toEqual({ ok: false, reason: "low-confidence" });
+    expect(classifyDish(labels, thresholds)).toEqual({ ok: false, reason: "low-confidence", candidates: [] });
   });
 
-  it("rejects as low-confidence when the only specific label falls just under the dish threshold", () => {
+  it("rejects as low-confidence when the only specific label falls just under the dish threshold, offering it as a candidate anyway", () => {
     const labels = [label("Food", 0.7), label("Pasta", 0.55)];
-    expect(classifyDish(labels, thresholds)).toEqual({ ok: false, reason: "low-confidence" });
+    expect(classifyDish(labels, thresholds)).toEqual({
+      ok: false,
+      reason: "low-confidence",
+      candidates: [{ label: "Pasta", confidence: 0.55 }],
+    });
   });
 
   it("accepts a dish with a garnish/side described only by generic labels (single specific candidate)", () => {

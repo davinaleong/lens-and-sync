@@ -21,6 +21,7 @@ model User {
   refreshTokens      RefreshToken[]
   savedChats         SavedChat[]
   mealPlans          MealPlan[]
+  scans              Scan[]
   verificationTokens VerificationToken[]
 }
 
@@ -108,14 +109,38 @@ enum MealType {
 }
 
 model MealEntry {
-  id         String    @id @default(uuid())
-  mealPlanId String
-  mealPlan   MealPlan  @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
-  date       DateTime  @db.Date
-  mealType   MealType
-  dishName   String
-  notes      String?
-  createdAt  DateTime  @default(now())
+  id          String    @id @default(uuid())
+  mealPlanId  String
+  mealPlan    MealPlan  @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  date        DateTime  @db.Date
+  mealType    MealType
+  dishName    String
+  // Copied from the source Scan at add-time (same pattern as dishName) so
+  // the shopping list can aggregate ingredients without joining back to a
+  // Scan that may since have been deleted.
+  ingredients String[]  @default([])
+  notes       String?
+  createdAt   DateTime  @default(now())
 
   @@index([mealPlanId])
+}
+
+// One row per "Log this meal" action - snapshots the already-fetched
+// /upload result (recipe + nutrition) rather than re-running Vision/Claude/
+// Edamam, since the client already has that data from the original upload.
+model Scan {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  dishName       String
+  ingredients    String[]
+  steps          String[]
+  calories       Float?
+  proteinGrams   Float?
+  fatGrams       Float?
+  carbsGrams     Float?
+  imageObjectKey String?
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
 }

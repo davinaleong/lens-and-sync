@@ -134,15 +134,29 @@ uploadRouter.post(
         return;
       }
 
-      const classification = classifyDish(analysis.labels, {
-        dishConfidenceThreshold: config.DISH_CONFIDENCE_THRESHOLD,
-        foodEvidenceThreshold: config.FOOD_EVIDENCE_THRESHOLD,
-      });
+      // Lets relabel.tsx resubmit the same photo with a user-picked dish
+      // name after an ambiguous (multi-dish/low-confidence) rejection,
+      // skipping re-classification entirely - moderation above still ran
+      // against this same request, so this never bypasses content safety.
+      const confirmedDishName =
+        typeof req.body?.confirmedDishName === "string" && req.body.confirmedDishName.trim()
+          ? req.body.confirmedDishName.trim().slice(0, 200)
+          : null;
+
+      const classification: DishClassification = confirmedDishName
+        ? { ok: true, dishName: confirmedDishName, confidence: 1 }
+        : classifyDish(analysis.labels, {
+            dishConfidenceThreshold: config.DISH_CONFIDENCE_THRESHOLD,
+            foodEvidenceThreshold: config.FOOD_EVIDENCE_THRESHOLD,
+          });
 
       if (!classification.ok) {
         const response = DISH_REJECTION_RESPONSES[classification.reason];
         logSecurityEvent(logger, { type: "upload-rejected", route: ROUTE, reason: classification.reason, statusCode: response.status, userId: req.userId });
-        res.status(response.status).json({ error: { code: classification.reason, message: response.message } });
+        res.status(response.status).json({
+          error: { code: classification.reason, message: response.message },
+          ...("candidates" in classification ? { candidates: classification.candidates } : {}),
+        });
         return;
       }
 

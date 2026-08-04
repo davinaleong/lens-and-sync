@@ -1,8 +1,14 @@
 import type { VisionLabel } from "../vision/index.js";
 
+export interface DishCandidate {
+  label: string;
+  confidence: number;
+}
+
 export type DishClassification =
   | { ok: true; dishName: string; confidence: number }
-  | { ok: false; reason: "non-dish" | "low-confidence" | "multi-dish" };
+  | { ok: false; reason: "non-dish" }
+  | { ok: false; reason: "low-confidence" | "multi-dish"; candidates: DishCandidate[] };
 
 export interface DishClassificationThresholds {
   dishConfidenceThreshold: number;
@@ -61,18 +67,23 @@ export function classifyDish(labels: VisionLabel[], thresholds: DishClassificati
     return { ok: false, reason: "non-dish" };
   }
 
-  const dishCandidates = normalized
+  const specificLabels = normalized
     .filter(
       (label) =>
         !CATEGORY_LABELS.has(label.key) &&
         !RAW_INGREDIENT_LABELS.has(label.key) &&
-        !IGNORED_LABELS.has(label.key) &&
-        label.score >= thresholds.dishConfidenceThreshold,
+        !IGNORED_LABELS.has(label.key),
     )
     .sort((a, b) => b.score - a.score);
 
+  const dishCandidates = specificLabels.filter((label) => label.score >= thresholds.dishConfidenceThreshold);
+
   if (dishCandidates.length > 1) {
-    return { ok: false, reason: "multi-dish" };
+    return {
+      ok: false,
+      reason: "multi-dish",
+      candidates: dishCandidates.slice(0, 5).map((c) => ({ label: c.description, confidence: c.score })),
+    };
   }
 
   if (dishCandidates.length === 1) {
@@ -85,5 +96,11 @@ export function classifyDish(labels: VisionLabel[], thresholds: DishClassificati
   if (hasRawIngredientEvidence) {
     return { ok: false, reason: "non-dish" };
   }
-  return { ok: false, reason: "low-confidence" };
+  // Below-threshold specific labels (if any) still make reasonable relabel
+  // suggestions even though none were confident enough to auto-accept.
+  return {
+    ok: false,
+    reason: "low-confidence",
+    candidates: specificLabels.slice(0, 5).map((c) => ({ label: c.description, confidence: c.score })),
+  };
 }

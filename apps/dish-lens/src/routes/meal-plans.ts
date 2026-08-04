@@ -16,7 +16,7 @@ const createPlanSchema = z.object({
 const addEntrySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
   mealType: z.enum(["BREAKFAST", "LUNCH", "DINNER", "SNACK"]),
-  dishName: z.string().min(1).max(200),
+  scanId: z.string().uuid(),
   notes: z.string().max(500).optional(),
 });
 
@@ -92,15 +92,16 @@ mealPlansRouter.post("/:planId/entries", async (req: AuthenticatedRequest, res, 
     }
     const parsed = addEntrySchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: { code: "invalid-request", message: "Required: date (YYYY-MM-DD), mealType (BREAKFAST|LUNCH|DINNER|SNACK), dishName." } });
+      res.status(400).json({ error: { code: "invalid-request", message: "Required: date (YYYY-MM-DD), mealType (BREAKFAST|LUNCH|DINNER|SNACK), scanId." } });
       return;
     }
-    const entry = await addMealEntry(req.userId as string, parsedId.data, parsed.data);
-    if (!entry) {
-      res.status(404).json({ error: { code: "not-found", message: "Meal plan not found." } });
+    const result = await addMealEntry(req.userId as string, parsedId.data, parsed.data);
+    if (!result.ok) {
+      const message = result.reason === "scan-not-found" ? "Scanned dish not found." : "Meal plan not found.";
+      res.status(404).json({ error: { code: result.reason, message } });
       return;
     }
-    res.status(201).json({ entry });
+    res.status(201).json({ entry: result.entry });
   } catch (err) {
     next(err);
   }
