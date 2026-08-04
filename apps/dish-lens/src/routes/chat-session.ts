@@ -41,6 +41,23 @@ chatSessionRouter.use(requireAuth(config.JWT_ACCESS_SECRET, logger));
 const sessionIdSchema = z.string().uuid();
 const sendMessageSchema = z.object({ content: z.string().min(1).max(2000) });
 
+/**
+ * Creates a session with no dish seed at all - `session.messages` starts
+ * empty (`createSession`'s own default), unlike an /upload-seeded
+ * session whose first message is always the JSON dish-context blob. The
+ * absence of a seed is exactly what `extractDishContext(undefined)`
+ * already treats as "no dish" below, so no separate "session kind" flag
+ * is needed anywhere - the seed's presence/absence *is* the flag.
+ */
+chatSessionRouter.post("/", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const session = await sessionStore.createSession(req.userId as string);
+    res.status(201).json({ sessionId: session.sessionId });
+  } catch (err) {
+    next(err);
+  }
+});
+
 chatSessionRouter.post("/:sessionId/messages", async (req: AuthenticatedRequest, res, next) => {
   try {
     const parsedId = sessionIdSchema.safeParse(req.params.sessionId);
@@ -61,11 +78,10 @@ chatSessionRouter.post("/:sessionId/messages", async (req: AuthenticatedRequest,
       return;
     }
 
+    // `null` here means either "no dish seed at all" (a general chat
+    // session, POST /chats/session) or a malformed one - both are valid
+    // to reply to, just without dish-specific context.
     const dish = extractDishContext(session.messages[0]);
-    if (!dish) {
-      res.status(409).json({ error: { code: "invalid-session", message: "This session isn't tied to a scanned dish." } });
-      return;
-    }
 
     const afterUser = await sessionStore.appendMessage(userId, parsedId.data, {
       role: "user",
@@ -76,10 +92,11 @@ chatSessionRouter.post("/:sessionId/messages", async (req: AuthenticatedRequest,
       return;
     }
 
-    // Real conversational turns only - message[0] is the JSON seed blob,
-    // not natural language, and would confuse the model as a prior turn.
-    // The last entry is the user message just appended, passed separately.
-    const history = afterUser.messages.slice(1, -1);
+    // Real conversational turns only. When there's a dish seed, message[0]
+    // is the JSON blob (not natural language) and must be excluded; a
+    // general session has no seed, so nothing to skip. The last entry is
+    // the user message just appended, passed separately either way.
+    const history = dish ? afterUser.messages.slice(1, -1) : afterUser.messages.slice(0, -1);
 
     const personalRecipe = await lookupPersonalRecipe(bearerToken(req.headers.authorization), parsed.data.content);
 
@@ -129,12 +146,13 @@ chatSessionRouter.post("/:sessionId/archive", async (req: AuthenticatedRequest, 
     }
 
     const dish = extractDishContext(session.messages[0]);
-    // Drop the JSON seed message - SavedChat.messages should read as an
-    // actual conversation, not a serialized upload result.
+    // Drop the JSON seed message when one exists - SavedChat.messages
+    // should read as an actual conversation, not a serialized upload
+    // result. A general (no-dish) session has no seed to drop.
     const saved = await saveChat({
       userId,
-      dishName: dish?.dishName ?? "Chat",
-      messages: session.messages.slice(1),
+      dishName: dish?.dishName ?? "General chat",
+      messages: dish ? session.messages.slice(1) : session.messages,
     });
     await sessionStore.deleteSession(userId, parsedId.data);
     res.status(201).json({ chat: saved });

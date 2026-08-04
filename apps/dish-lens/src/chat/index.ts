@@ -13,10 +13,16 @@ export type ChatReplyResult = { ok: true; reply: string } | { ok: false; reason:
 // personal recipe can't crowd out the actual conversation in the prompt.
 const MAX_PERSONAL_RECIPE_CHARS = 4000;
 
-function systemPrompt(dish: DishContext, personalRecipe: PersonalRecipe | null): string {
+function systemPrompt(dish: DishContext | null, personalRecipe: PersonalRecipe | null): string {
   const personalRecipeSection = personalRecipe
     ? `\n\nThe user also has their own saved recipe that may be relevant, titled "${personalRecipe.title}":\n${personalRecipe.text.slice(0, MAX_PERSONAL_RECIPE_CHARS)}\n\nPrefer this over inventing a generic version when it's actually relevant to what they're asking - mention it's from their own saved recipes when you use it.`
     : "";
+
+  if (!dish) {
+    return `You are a friendly cooking assistant in the DishLens app. This conversation isn't tied to any specific scanned dish - the user is asking general recipe, cooking, or nutrition questions.${personalRecipeSection}
+
+Answer their questions about recipes, ingredient substitutions, dietary adjustments, cooking technique, meal planning, and nutrition. Keep answers concise and practical for a home cook.`;
+  }
 
   return `You are a friendly cooking assistant helping a user who just scanned a photo of "${dish.dishName}" in the DishLens app.
 
@@ -36,7 +42,7 @@ function extractText(message: Anthropic.Message): string | undefined {
 export async function generateChatReply(
   client: ChatClient,
   model: string,
-  dish: DishContext,
+  dish: DishContext | null,
   history: ChatMessage[],
   userMessage: string,
   personalRecipe: PersonalRecipe | null = null,

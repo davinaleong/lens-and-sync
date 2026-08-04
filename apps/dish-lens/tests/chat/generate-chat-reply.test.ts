@@ -93,4 +93,29 @@ describe("generateChatReply", () => {
     const call = (client.messages.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(call.system).not.toContain("own saved recipe");
   });
+
+  it("uses a general (not dish-specific) system prompt when dish is null", async () => {
+    const client = fakeClient("Try a simple weeknight pasta.");
+
+    const result = await generateChatReply(client, "claude-sonnet-5", null, [], "Any easy dinner ideas?");
+
+    expect(result).toEqual({ ok: true, reply: "Try a simple weeknight pasta." });
+    const call = (client.messages.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.system).not.toContain("Margherita Pizza");
+    expect(call.system).toContain("isn't tied to any specific scanned dish");
+  });
+
+  it("still includes a matched personal recipe in the general (no-dish) system prompt", async () => {
+    const client = fakeClient("Sure!");
+
+    await generateChatReply(client, "claude-sonnet-5", null, [], "How do I make pizza?", {
+      fileId: "abc123",
+      title: "Grandma's Margherita Pizza",
+      sourceUrl: "https://docs.google.com/document/d/abc123",
+      text: "Use San Marzano tomatoes and fresh basil.",
+    });
+
+    const call = (client.messages.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.system).toContain("Grandma's Margherita Pizza");
+  });
 });
