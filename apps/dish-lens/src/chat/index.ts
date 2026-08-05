@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { PersonalRecipe } from "../drive-sync-client/index.js";
+import { extractText } from "../recipe/extract-text.js";
 import type { ChatMessage } from "../session/session-store.js";
 import type { DishContext } from "./dish-context.js";
 
@@ -32,11 +33,6 @@ Steps: ${dish.recipe.steps.join(" ")}
 ${personalRecipeSection}
 
 Answer their questions about this dish - nutrition, ingredient substitutions, dietary adjustments, cooking technique, and similar. Keep answers concise and practical for a home cook. Stay focused on this dish and closely related cooking topics.`;
-}
-
-function extractText(message: Anthropic.Message): string | undefined {
-  const block = message.content.find((b): b is Anthropic.TextBlock => b.type === "text");
-  return block?.text;
 }
 
 export async function generateChatReply(

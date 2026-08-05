@@ -7,6 +7,7 @@ import multer from "multer";
 import { RedisStore, type RedisReply } from "rate-limit-redis";
 import { config } from "../config.js";
 import { classifyDish, type DishClassification } from "../edge-cases/index.js";
+import { adjudicateMultiDish, type AdjudicationImageMediaType } from "../edge-cases/multi-dish-adjudication.js";
 import { logger } from "../logger.js";
 import { checkModeration } from "../moderation/index.js";
 import { lookupNutrition } from "../nutrition/index.js";
@@ -76,6 +77,11 @@ const DISH_REJECTION_RESPONSES: Record<Exclude<DishClassification, { ok: true }>
   "multi-dish": { status: 422, message: "Multiple dishes were detected. Please upload a photo of a single dish." },
 };
 
+// Narrower than the set of formats this route accepts on upload (which also
+// allows heic/heif) - Claude's image input only reads these four, so a
+// heic/heif upload just skips adjudication and keeps classifyDish's verdict.
+const ADJUDICATION_SUPPORTED_MEDIA_TYPES = new Set<string>(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
 /**
  * Rejects anything that isn't a multipart request before multer parses
  * it - a strict Content-Type check distinct from `validateUpload`'s
@@ -143,12 +149,36 @@ uploadRouter.post(
           ? req.body.confirmedDishName.trim().slice(0, 200)
           : null;
 
-      const classification: DishClassification = confirmedDishName
+      let classification: DishClassification = confirmedDishName
         ? { ok: true, dishName: confirmedDishName, confidence: 1 }
         : classifyDish(analysis.labels, {
             dishConfidenceThreshold: config.DISH_CONFIDENCE_THRESHOLD,
             foodEvidenceThreshold: config.FOOD_EVIDENCE_THRESHOLD,
           });
+
+      // The word-overlap heuristic in classifyDish can't tell a composite
+      // dish (one dish, several plated components) from a photo of
+      // genuinely separate dishes when Vision's labels for the two don't
+      // share a word - e.g. "Pasta", "Bolognese sauce", "Spaghetti" all
+      // name the same plate but don't overlap lexically. Give it a second
+      // opinion - from the actual photo, not just the label list - before
+      // rejecting, rather than hand-maintaining a synonym list.
+      if (!classification.ok && classification.reason === "multi-dish" && ADJUDICATION_SUPPORTED_MEDIA_TYPES.has(assessment.mimeType)) {
+        try {
+          const adjudication = await adjudicateMultiDish(
+            anthropicClient,
+            config.ANTHROPIC_MODEL,
+            { buffer: req.file.buffer, mediaType: assessment.mimeType as AdjudicationImageMediaType },
+            classification.candidates,
+          );
+          if (adjudication.ok && adjudication.isSingleDish) {
+            const topCandidate = classification.candidates[0];
+            classification = { ok: true, dishName: adjudication.dishName, confidence: topCandidate?.confidence ?? 1 };
+          }
+        } catch (err) {
+          logger.error({ err }, "Multi-dish adjudication failed - keeping the original multi-dish rejection.");
+        }
+      }
 
       if (!classification.ok) {
         const response = DISH_REJECTION_RESPONSES[classification.reason];
@@ -183,6 +213,7 @@ uploadRouter.post(
 
       const recipeResult = await generateRecipe(anthropicClient, config.ANTHROPIC_MODEL, classification.dishName);
       if (!recipeResult.ok) {
+        logger.error({ reason: recipeResult.reason, dishName: classification.dishName }, "Recipe generation failed.");
         res.status(502).json({
           error: {
             code: "recipe-generation-failed",
