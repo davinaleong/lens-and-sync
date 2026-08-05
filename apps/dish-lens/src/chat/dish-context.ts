@@ -4,7 +4,7 @@ import type { ChatMessage } from "../session/session-store.js";
 // Matches the JSON blob POST /upload appends as a session's first
 // (assistant) message - see routes/upload.ts. Not real conversational
 // content, just the recipe/nutrition result the session was seeded from.
-const dishContextSchema = z.object({
+export const dishContextSchema = z.object({
   dishName: z.string(),
   recipe: z.object({
     dishName: z.string(),

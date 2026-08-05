@@ -2,7 +2,7 @@ import { requireAuth, type AuthenticatedRequest } from "@lens-and-sync/shared-au
 import type { ErrorRequestHandler } from "express";
 import { Router } from "express";
 import { z } from "zod";
-import { extractDishContext } from "../chat/dish-context.js";
+import { dishContextSchema, extractDishContext } from "../chat/dish-context.js";
 import { generateChatReply } from "../chat/index.js";
 import { config } from "../config.js";
 import { findPersonalRecipe, type PersonalRecipe } from "../drive-sync-client/index.js";
@@ -25,7 +25,14 @@ async function lookupPersonalRecipe(accessToken: string | undefined, query: stri
   if (!config.DRIVE_SYNC_BASE_URL || !accessToken) return null;
   try {
     const result = await findPersonalRecipe(config.DRIVE_SYNC_BASE_URL, accessToken, query);
-    return result.ok ? result.recipe : null;
+    if (!result.ok) {
+      // Previously silent - a failed cross-service call (e.g. a
+      // JWT_ACCESS_SECRET mismatch between this service and drive-sync)
+      // was indistinguishable from "genuinely no personal recipe found."
+      logger.error({ reason: result.reason }, "Personal recipe lookup failed - continuing without it.");
+      return null;
+    }
+    return result.recipe;
   } catch (err) {
     logger.error({ err }, "Personal recipe lookup failed - continuing without it.");
     return null;
@@ -40,18 +47,35 @@ chatSessionRouter.use(requireAuth(config.JWT_ACCESS_SECRET, logger));
 
 const sessionIdSchema = z.string().uuid();
 const sendMessageSchema = z.object({ content: z.string().min(1).max(2000) });
+const createSessionSchema = z.object({ dish: dishContextSchema.optional() });
 
 /**
- * Creates a session with no dish seed at all - `session.messages` starts
- * empty (`createSession`'s own default), unlike an /upload-seeded
- * session whose first message is always the JSON dish-context blob. The
- * absence of a seed is exactly what `extractDishContext(undefined)`
- * already treats as "no dish" below, so no separate "session kind" flag
- * is needed anywhere - the seed's presence/absence *is* the flag.
+ * Creates a session, optionally seeded with dish context up front - for a
+ * dish the caller already has full recipe data for (e.g. a past food-log
+ * entry, which has no live /upload session to reuse) but that isn't
+ * otherwise reachable via a fresh /upload call. Without `dish`,
+ * `session.messages` starts empty (`createSession`'s own default), same
+ * as before - the absence of a seed is exactly what
+ * `extractDishContext(undefined)` already treats as "no dish" below, so no
+ * separate "session kind" flag is needed anywhere - the seed's
+ * presence/absence *is* the flag.
  */
 chatSessionRouter.post("/", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const session = await sessionStore.createSession(req.userId as string);
+    const parsed = createSessionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: "invalid-request", message: "Invalid dish context." } });
+      return;
+    }
+
+    const userId = req.userId as string;
+    const session = await sessionStore.createSession(userId);
+    if (parsed.data.dish) {
+      await sessionStore.appendMessage(userId, session.sessionId, {
+        role: "assistant",
+        content: JSON.stringify(parsed.data.dish),
+      });
+    }
     res.status(201).json({ sessionId: session.sessionId });
   } catch (err) {
     next(err);
